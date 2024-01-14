@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Adding custom 404 pages to sourcehut pages</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Adding custom 404 pages to sourcehut pages</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'meta'." href="../tags/meta.html" rel="tag">meta</a></p>
+        <p>As I mentioned <a href="https://www.kvakil.me/posts/newsite.html">in a previous blog post</a>, this site is hosted on <a href="//srht.site">srht.site</a> (sourcehut’s static hosting service).
+The default 404 page for static sites is simply the plaintext “404 page not found”, which is not very useful. Other services like <a href="https://docs.github.com/en/pages">Github Pages</a> let you <a href="https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-custom-404-page-for-your-github-pages-site">configure a custom 404 page</a>.</p>
+<p>It turns out this functionality is also available in sourcehut pages as
+of <a href="https://git.sr.ht/~sircmpwn/pages.sr.ht/commit/9cd00b9c6b3b28d2dca891eecd972371e5d84dcf">this recent patch</a>.
+Unfortunately, the functionality is only available through sourcehut’s
+GraphQL API at <a href="//pages.sr.ht">pages.sr.ht</a>, which has very little documentation.</p>
+<p>Here’s how you can upload your <code>site.tar.gz</code> to a domain, while also
+having 404 requests serve <code>404.html</code>:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">acurl</span> <span class="at">-F</span> <span class="st">'operations={&quot;query&quot;: &quot;mutation ($site: Upload!)'</span><span class="dt">\</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="st">'{ publish(domain: \&quot;kvakil.me\&quot;, content: $site,'</span><span class="dt">\</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="st">'protocol: null,'</span><span class="dt">\</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="st">'subdirectory: null,'</span><span class="dt">\</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    <span class="st">'siteConfig: {notFound: \&quot;404.html\&quot;} ) { id } }'</span><span class="dt">\</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    <span class="st">'&quot;, &quot;variables&quot;: {&quot;site&quot;: null}}'</span> <span class="dt">\</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    <span class="at">-F</span> <span class="st">'map={&quot;0&quot;:[&quot;variables.site&quot;]}'</span> <span class="dt">\</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">-F</span> 0=@../site.tar.gz https://pages.sr.ht/query</span></code></pre></div>
+<p>and you can see my (boring) <a href="../404.html">custom 404 page here</a>.</p>
+<p>A quick breakdown:</p>
+<ul>
+<li><code>acurl</code>: sourcehut’s “authenticated curl” wrapper which automatically
+injects the oauth2 token for GraphQL.</li>
+<li><code>mutation .. publish</code>: from <a href="//pages.sr.ht">pages.sr.ht</a>’s <a href="https://git.sr.ht/~sircmpwn/pages.sr.ht/tree/master/item/graph/schema.graphqls">GraphQL schema</a>.</li>
+<li><code>$site: Upload!</code>, <code>variables</code>, <code>map</code>, and <code>-F ...</code>: see the <a href="https://github.com/jaydenseric/graphql-multipart-request-spec">GraphQL
+multipart request specification</a>.</li>
+</ul>
+<p>Since my configuration actually updates two sites at once (both
+kvakil.me and www.kvakil.me), I tried to do both requests in one GraphQL
+request. Unfortunately this errored out with <code>EOF</code>, presumably because
+the upload can only be used once. I ended up just copy-pasting that
+command twice.</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-03-27
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

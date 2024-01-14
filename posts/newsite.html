@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>New Blog, New Site</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>New Blog, New Site</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'meta'." href="../tags/meta.html" rel="tag">meta</a></p>
+        <p>Having just turned twenty-four, have resolved to embark on grand project
+of writing every day in this new static site just created with Hakyll.
+Exciting to think how in one year, at rate of one page/day, will have
+written three hundred and sixty-five pages, and what a picture of life
+and times then available for kids &amp; grandkids, even greatgrandkids,
+whoever, all are welcome (!) to see how life really was/is now.</p>
+<p>But seriously, I rewrote this site in
+<a href="https://jaspervdj.be/hakyll/">Hakyll</a>, converted over my old Jekyll
+blog, and am going to try to write more often. I’m hosting the site on
+<a href="https://sr.ht/">sr.ht</a>, which has been a pretty delightful setup
+experience thus far.</p>
+<p>I mostly followed sr.ht’s <a href="https://srht.site/automating-deployments">Automating
+deployments</a> instruction. One
+caveat that the documentation doesn’t mention is that you will need
+to add a <a href="https://man.sr.ht/builds.sr.ht/#secrets">secret</a> for private
+repositories.</p>
+<p>Here’s the <code>.build.yml</code> that builds this site.</p>
+<pre><code>image: debian/stable
+oauth: pages.sr.ht/PAGES:RW
+packages:
+- libghc-hakyll-dev
+environment:
+  site: kvakil.srht.site
+tasks:
+- upload: |
+    cd $site
+    ghc --make site.hs
+    sudo locale-gen &quot;C.UTF-8&quot;
+    export LC_ALL=C.UTF-8
+    ./site rebuild
+    cd _site
+    tar -cvz . &gt; ../site.tar.gz
+    acurl -f https://pages.sr.ht/publish/$site -Fcontent=@../site.tar.gz
+secrets:
+- ********-****-****-****-************
+sources:
+- git@git.sr.ht:~kvakil/kvakil.srht.site</code></pre>
+<p>This takes ~1 minute to bulid my tiny site – most of the time is spent
+installing <code>libghc-hakyll-dev</code>. I adapted the format <a href="https://inv.alid.pw/posts/hakyll-sourcehut/">from this blog
+post</a>, but that one takes
+much longer to run (&gt;30 minutes) because it installs everything from
+source. Using debian’s packages here makes everything faster.</p>
+<p>I’m not really sure about the locale stuff, but it fixed some
+inscrutable errors I was getting, including:</p>
+<pre><code>hGetContents: invalid argument (invalid byte sequence)</code></pre>
+<p>and</p>
+<pre><code>commitBuffer: invalid argument (invalid character)</code></pre>
+<p>and so it stays.</p>
+<p><em>Edit:</em> turns out this is <a href="https://jaspervdj.be/hakyll/tutorials/faq.html#hgetcontents-invalid-argument-or-commitbuffer-invalid-argument">specificed in the Hakyll
+FAQ</a>,
+oops.</p>
+<p>Anyways, let’s see if I can keep up the writing. :)</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-03-24
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

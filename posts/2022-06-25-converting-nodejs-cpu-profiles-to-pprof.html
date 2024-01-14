@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Converting NodeJS CPU profiles to pprof</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Converting NodeJS CPU profiles to pprof</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p>I wrote <a href="https://git.sr.ht/~kvakil/v8profile-to-pprof">v8profile-to-pprof</a>, which converts V8 CPU profiles to
+<a href="https://github.com/google/pprof">pprof</a>. This lets you convert Javascript profiles captured by
+NodeJS or in Google Chrome and open them in pprof.</p>
+<h2 id="why-i-like-pprof">Why I like <code>pprof</code></h2>
+<p>My favorite thing about <code>pprof</code> is that it is great for data analysis.</p>
+<ul>
+<li><p><strong>Merging profiles:</strong> You can use <code>pprof -proto ... &gt; output.pb.gz</code> to
+merge a bunch of pprof profiles into one. This is great if you have
+100s of profiles and want to see what the “average” one looks like.</p></li>
+<li><p><strong>Comparing profiles:</strong> <code>pprof</code> has comparison functionality
+(<code>-diff_base</code>) which lets you see what changed between two profiles.</p></li>
+<li><p><strong>Distribution of times:</strong> If you want more specific distribution
+statistics, <code>pprof -top</code> is great for ad-hoc data analysis. For
+example, lets say you have a lot of profiles and you want to see how
+much time you spend in the <code>foo</code> function in each profile. It’s just a
+simple shell script away:</p></li>
+</ul>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> f <span class="kw">in</span> <span class="pp">*</span>.pb.gz<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="ex">~/go/bin/pprof</span> <span class="at">-top</span> <span class="at">-unit</span> ms <span class="at">-nodefraction</span> 0 <span class="va">$f</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span> <span class="kw">|</span> <span class="fu">awk</span> <span class="st">'/ foo$/{print $4}'</span></span></code></pre></div>
+<p>For interactive use, <code>pprof</code>’s viewer has some great features. It’s
+easiest to contrast with what <a href="https://developer.chrome.com/docs/devtools/evaluate-performance/#record">Chrome’s DevTools</a> provides. Here’s
+the “Chart” view of DevTools:</p>
+<center>
+<figure>
+<img src="../assets/sample-cpuprofile.png" alt="A sample profile loaded in Chromium’s DevTools. It’s easy to see here that main calls foo and bar, and how long they take respectively." />
+<figcaption aria-hidden="true">A sample profile loaded in Chromium’s DevTools. It’s easy to
+see here that <code>main</code> calls <code>foo</code> and <code>bar</code>, and how long they take
+respectively.</figcaption>
+</figure>
+</center>
+<center>
+<figure>
+<img src="../assets/sample-pprof-graph.png" alt="The same profile opened in pprof’s web UI. An edge from X to Y indicates that X calls Y (potentially multiple times), and is annotated with the total call time." />
+<figcaption aria-hidden="true">The same profile opened in <code>pprof</code>’s web UI. An edge from <code>X</code>
+to <code>Y</code> indicates that <code>X</code> calls <code>Y</code> (potentially multiple times), and is
+annotated with the total call
+time.</figcaption>
+</figure>
+</center>
+<p>I found the call graph view harder to understand at first, but it’s
+great for long profiles with many functions. It’s especially useful if
+you have single function which is called from different places (for
+example, <code>foo</code> in the above sample). <code>pprof</code>’s view lets you easily see
+all the callers and callees, which is much harder in the timeline view.</p>
+<p><code>pprof</code> also provides other nice views, like flamegraphs and
+source-views. Strangely, one thing it does not provide is the timeline
+view, so having the original CPU profile around is also useful.</p>
+<p>For more details on <code>pprof</code>, <a href="https://github.com/google/pprof/blob/c488b8fa1db3fa467bf30beb5a1d6f4f10bb1b87/doc/README.md">see their README</a>.</p>
+<h2 id="technical-notes">Technical Notes</h2>
+<p>I wrote this <a href="https://git.sr.ht/~kvakil/v8profile-to-pprof/tree/2573c1d9/item/src/Main.hs">in Haskell</a>. I am not super good at Haskell (yet),
+so caveat emptor.</p>
+<p>I used <a href="https://hackage.haskell.org/package/aeson"><code>aeson</code></a> to parse the V8 CPU profile (since it’s just
+JSON under the hood). <code>pprof</code> takes in gzipped protobufs, so I used
+<a href="https://github.com/google/proto-lens"><code>proto-lens</code></a> to generate an encoder based on the
+<a href="https://github.com/google/pprof/blob/c488b8fa1db3fa467bf30beb5a1d6f4f10bb1b87/proto/profile.proto"><code>profile.proto</code></a> in <code>pprof</code>.</p>
+<p>Since I was already using lenses for <code>proto-lens</code>, I opted to use lenses
+for my state too. I am not very happy with how the code turned out – it
+felt like lenses made it really easy to use state, and so I ended up
+with way too much state. For example, here’s what the main function
+looks like:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">data</span> <span class="dt">PprofState</span> <span class="ot">=</span> <span class="dt">PprofState</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  {<span class="ot"> _internStringTable ::</span> <span class="dt">StringTable</span>,</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="ot">    _internFunctionTable ::</span> <span class="dt">FunctionTable</span>,</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="ot">    _parentNodes ::</span> <span class="dt">ParentNodeMap</span>,</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="ot">    _nodesById ::</span> <span class="dt">M.Map</span> <span class="dt">Int64</span> <span class="dt">ProfileNode</span>,</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="ot">    _previousStack ::</span> <span class="dt">V.Vector</span> <span class="dt">Int64</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>makeLenses '<span class="dt">'PprofState</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="ot">convertProfile ::</span> <span class="dt">V8Profile</span> <span class="ot">-&gt;</span> <span class="dt">State</span> <span class="dt">PprofState</span> <span class="dt">P.Profile</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>convertProfile v8profile <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  forM_ (nodes v8profile) <span class="op">$</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>    liftM2 (<span class="op">&gt;&gt;</span>) (zoom parentNodes <span class="op">.</span> populateParentMap) processNode</span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pure</span> defMessage</span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addSamples (<span class="fu">uncurry</span> V.zip <span class="op">$</span> (samples <span class="op">&amp;&amp;&amp;</span> timeDeltas) v8profile)</span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addSampleTypes</span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addLocationTable</span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addFunctionTable</span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addStringTable</span></code></pre></div>
+<p>This looks pretty but it is IMO quite ugly. I really should have
+untangled the state dependencies here. In particular:</p>
+<ul>
+<li>The first <code>forM_</code> populates <code>_parentNodes</code>, <code>_nodesById</code> and
+<code>_internFunctionTable</code>.</li>
+<li><code>addSamples</code> depends on <code>_parentNodes</code> and <code>_nodesById</code> being
+correctly populated.</li>
+<li><code>addFunctionTable</code> depends on <code>_internFunctionTable</code>.</li>
+<li><code>addLocationTable</code> depends on <code>_nodesById</code> and <code>_internFunctionTable</code>.</li>
+<li><code>addStringTable</code> depends on everything before it.</li>
+</ul>
+<p>So I have ended up with spaghetti. With the benefit of hindsight, I
+would have made the dependencies explicit.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode haskell"><code class="sourceCode haskell"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ot">convertProfile ::</span> <span class="dt">V8Profile</span> <span class="ot">-&gt;</span> <span class="dt">State</span> <span class="dt">PprofState</span> <span class="dt">P.Profile</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>convertProfile v8profile <span class="ot">=</span> <span class="kw">do</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="kw">let</span> parentNodes <span class="ot">=</span> createParentNodes v8profile</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>      nodesById <span class="ot">=</span> createNodesById v8profile</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>      internFunctionTable <span class="ot">=</span> createInternFunctionTable v8profile</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>      samples <span class="ot">=</span> samples v8profile</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>      timeDeltas <span class="ot">=</span> timeDeltas v8profile</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pure</span> defMessage</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addSampleTypes</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addSamples (V.zip samples timeDeltas)</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addFunctionTable internFunctionTable</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addLocationTable internFunctionTable nodesById </span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>    <span class="op">&gt;&gt;=</span> addStringTable</span></code></pre></div>
+<p>I probably would leave the <code>addStringTable</code> state implicit, because it
+would get unwieldy to pass around otherwise. But I really have no excuse
+for why <code>PprofState</code> is so large.</p>
+<p>One other “low-light” of the code was that I ended up a little confused
+between <code>Int64</code>, <code>Word64</code> and <code>Int</code>. <code>proto-lens</code> only uses <code>Int64</code> and
+<code>Word64</code>, whereas a lot of my functions used <code>Int</code>. So I ended up with a
+lot of <code>fromIntegral</code> to convert the output for <code>proto-lens</code>, and I’m
+still not totally convinced it’s correct. It probably would have made
+more sense just to do everything with <code>Int64</code>/<code>Word64</code> for consistency.</p>
+<p>Anyway aside from the pretty poor state management I’m decently happy
+with how the code turned out.</p>
+<h2 id="future-features">Future Features</h2>
+<p>I’d like to support line ticks. V8’s CPU profiles actually have
+line-level granularity under a field called <code>positionTicks</code>.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>      <span class="er">&quot;positionTicks&quot;:</span> <span class="ot">[</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>        <span class="fu">{</span> <span class="dt">&quot;line&quot;</span><span class="fu">:</span> <span class="dv">17</span><span class="fu">,</span> <span class="dt">&quot;ticks&quot;</span><span class="fu">:</span> <span class="dv">1</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>        <span class="fu">{</span> <span class="dt">&quot;line&quot;</span><span class="fu">:</span> <span class="dv">14</span><span class="fu">,</span> <span class="dt">&quot;ticks&quot;</span><span class="fu">:</span> <span class="dv">79</span> <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>        <span class="fu">{</span> <span class="dt">&quot;line&quot;</span><span class="fu">:</span> <span class="dv">13</span><span class="fu">,</span> <span class="dt">&quot;ticks&quot;</span><span class="fu">:</span> <span class="dv">3</span> <span class="fu">}</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>      <span class="ot">]</span></span></code></pre></div>
+<p>This tells us that line 14 of the relevant function was much slower than
+the other two lines. For some reason, Chrome’s DevTools do not expose
+this information at all. Currently I just group everything by functions
+when I spit them out, but I want to support these line level ticks too
+so you can see them in pprof.</p>
+<p>On a more mundane note, I’d also like better usability. Right now it
+doesn’t take any command line arguments (not even <code>--help</code>) nor does it
+<code>gzip</code> the resulting protobuf, so it’s a little unwieldy to actually do the
+conversion:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">v8profile-to-pprof</span> <span class="op">&lt;</span> profile.cpuprofile <span class="kw">|</span> <span class="fu">gzip</span> <span class="at">-c</span> <span class="op">&gt;</span> profile.pb.gz</span></code></pre></div>
+<p>I think this’ll become more relevant, as I also want to support memory
+and allocation profiles too.</p>
+<p>Finally, I want tests and a release system. It’s relatively small
+code right now, so I just test it manually. I did set up <a href="https://git.sr.ht/~kvakil/v8profile-to-pprof/tree/2573c1d9/item/.build.yml">a nightly
+build</a>, but I haven’t gone through the legwork of writing snapshot
+tests and integrating with <a href="https://man.sr.ht/git.sr.ht/api.md#post-apireposnameartifactsref">sourcehut’s repository artifacts</a> for
+releases. I also want to figure out how to compile for other machines
+besides x86-64 Linux.</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-06-25
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

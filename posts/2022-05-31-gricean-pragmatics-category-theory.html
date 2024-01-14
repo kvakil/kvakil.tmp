@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Gricean Pragmatics with Category Theory</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+         <link rel="stylesheet" href="../css/katex.min.css"><script type="text/javascript" defer src="../js/katex.min.js" onload="const macros = {};document.querySelectorAll('.math').forEach((e) =&gt; katex.render(e.textContent, e, {displayMode: e.classList.contains('display'), throwOnError: false, trust: true, macros}))"></script> 
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Gricean Pragmatics with Category Theory</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'math'." href="../tags/math.html" rel="tag">math</a></p>
+        <p>I am doing the <a href="https://ocw.mit.edu/courses/18-s097-applied-category-theory-january-iap-2019/">MIT OCW “Applied Category Theory”</a> course, for “fun”.
+I had trouble solving one of the problems from <a href="https://ocw.mit.edu/courses/18-s097-applied-category-theory-january-iap-2019/resources/18-s097iap19ps1-1/">Problem Set 1</a> by
+hand so I decided to try using my computer.</p>
+<h3 id="problem-statement">Problem Statement</h3>
+<blockquote>
+<p><strong>Question 4.</strong> Gricean Pragmatics (with thanks to Reuben Cohn-Gordon).</p>
+<p>Grice’s maxims for cooperative conversation say that a speaker should strive
+to say the maximally informative utterance that is nonetheless true. A speaker
+is pragmatic if they obey these maxims. We’ll model a pragmatic speaker with
+Galois connections.</p>
+<p>Let <span class="math inline">W</span> be a set of objects. For example, let
+<span class="math display">W = \{\square, \blacksquare, \circ\}.</span></p>
+<p>Suppose we know something about an object in the world. This is represented
+by a subset <span class="math inline">W' \subseteq W</span>. The subset <span class="math inline">\{\square, \blacksquare, \circ\}</span> represents the knowledge that the
+object exists, the subset <span class="math inline">\{\blacksquare, \circ\}</span> represents the knowledge that the object is either
+<span class="math inline">\blacksquare</span> or <span class="math inline">\circ</span>, the subset <span class="math inline">\emptyset</span> represents the knowledge that the object does not exist.
+Suppose we also have the poset <span class="math inline">U</span> of utterances as on the left below. The
+literal listener <span class="math inline">L</span> takes an utterance, and understands it as communicating
+something—a predicate—about an object in question. Let <span class="math inline">L : U \to P(W)</span> be
+the monotone map shown in blue:</p>
+<center>
+<img src="../assets/utterances.png" />
+</center>
+<ol type="a">
+<li>The map <span class="math inline">L</span> has a left adjoint <span class="math inline">S : P(W) \to U</span>. For each of the eight
+distinctions <span class="math inline">W' \subseteq W</span>, calculate <span class="math inline">S(W)</span>. For example, what is <span class="math inline">S(\square)</span>,
+what is <span class="math inline">S(\blacksquare)</span>, etc.?</li>
+<li>Explain how <span class="math inline">S</span> can be understood as the pragmatic speaker.</li>
+</ol>
+<p>Extra credit: In fact <span class="math inline">S</span> happens to have a further left adjoint,
+which we might call the pragmatic listener <span class="math inline">L' : U \to P(W)</span>.
+Calculate it for extra credit, and explain its semantics in terms of a
+game where the speaker has a card, either <span class="math inline">\square</span>, <span class="math inline">\blacksquare</span>,
+or <span class="math inline">\circ</span>, and the pragmatic listener has to guess it.</p>
+</blockquote>
+<h3 id="solution-with-sagemath">Solution with SageMath</h3>
+<p>It’s not too hard to solve this by hand, but let’s see a solution in
+<a href="https://www.sagemath.org/">SageMath</a>. (I originally tried to use
+<a href="https://github.com/AlgebraicJulia/Catlab.jl">Catlab.jl</a>, but its
+documentation was too incomplete to try.)</p>
+<p>We start with an <code>Enum</code> for the different objects. It’ll make things
+look slightly nicer later:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> enum <span class="im">import</span> Enum</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> Object(Enum):</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    WHITE_SQUARE <span class="op">=</span> <span class="dv">1</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    BLACK_SQUARE <span class="op">=</span> <span class="dv">2</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    WHITE_DOT <span class="op">=</span> <span class="dv">3</span></span></code></pre></div>
+<p>Now we define the poset <span class="math inline">P(W)</span>. Rather than creating our own custom
+poset, we’ll use the builtin <code>BooleanLattice</code> poset. This is a little
+annoying – <code>BooleanLattice</code> uses integers and so we’ll need to convert
+<code>Object -&gt; int</code> occasionally.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>PW <span class="op">=</span> posets.BooleanLattice(<span class="dv">3</span>, use_subsets<span class="op">=</span><span class="va">True</span>)</span></code></pre></div>
+<p>Next we’ll define the poset <span class="math inline">U</span>. We’ll use a custom poset here: the
+first argument of the tuple will be the elements of the poset and the
+second argument will be the relations (i.e., pairs <span class="math inline">(x, y)</span> with <span class="math inline">x \le y</span>). Sage will take the transitive closure of the relations for us:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> Utterances(Enum):</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    OBJECT <span class="op">=</span> <span class="dv">4</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    SQUARE <span class="op">=</span> <span class="dv">3</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    WHITE_OBJECT <span class="op">=</span> <span class="dv">2</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    WHITE_SQUARE <span class="op">=</span> <span class="dv">1</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    NOTHING <span class="op">=</span> <span class="dv">0</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>U <span class="op">=</span> Poset(</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>    (</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>        Utterances,</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>        [</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>            [Utterances.SQUARE, Utterances.OBJECT],</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>            [Utterances.WHITE_OBJECT, Utterances.OBJECT],</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>            [Utterances.WHITE_SQUARE, Utterances.WHITE_OBJECT],</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>            [Utterances.WHITE_SQUARE, Utterances.SQUARE],</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>            [Utterances.NOTHING, Utterances.WHITE_SQUARE],</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>        ],</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<p>Now we define a function which takes the left adjoint of its input.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> functools <span class="im">import</span> <span class="bu">reduce</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> maybe_left_adjoint(P, Q, g):</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="co">&quot;&quot;&quot;Given g : Q -&gt; P, return the left adjoint.</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="co">    If the left adjoint does not exist,</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="co">    the behavior of this function is undefined.&quot;&quot;&quot;</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> f(p):</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="bu">reduce</span>(</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>            Q.meet, (q <span class="cf">for</span> q <span class="kw">in</span> Q.<span class="bu">list</span>() <span class="cf">if</span> P.le(p, g(q)))</span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>        )</span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> f</span></code></pre></div>
+<p>This construction is given in the proof of the <a href="https://ncatlab.org/nlab/show/adjoint+functor+theorem">Adjoint Functor Theorem
+for Preorders</a> in Theorem 1.108. I’ve titled the function
+<code>maybe_left_adjoint</code> because this construction may actually
+create something which is not a left adjoint. If <code>g</code> has a left
+adjoint, then we will return the right function, but it’s
+possible that <code>g</code> doesn’t have a left adjoint at all.</p>
+<p>Let’s define a function to verify that the returned function is indeed a
+left adjoint. We’ll create <code>is_left_adjoint</code> based on Proposition 1.101
+in the text.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> is_monotone(P, Q, f):</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    <span class="co">&quot;&quot;&quot;Check if f : P -&gt; Q is monotone.&quot;&quot;&quot;</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> <span class="bu">all</span>(</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>        (Q.le(f(x), f(y)) <span class="cf">for</span> x, y <span class="kw">in</span> P.relations_iterator())</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> is_left_adjoint(P, Q, f, g):</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="co">&quot;&quot;&quot;Given f : P -&gt; Q and g : Q -&gt; P, check if f |- g&quot;&quot;&quot;</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> (</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>        is_monotone(P, Q, f)</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>        <span class="kw">and</span> is_monotone(Q, P, g)</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>        <span class="kw">and</span> <span class="bu">all</span>((P.le(p, g(f(p))) <span class="cf">for</span> p <span class="kw">in</span> P.<span class="bu">list</span>()))</span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>        <span class="kw">and</span> <span class="bu">all</span>((Q.le(q, f(g(q))) <span class="cf">for</span> q <span class="kw">in</span> Q.<span class="bu">list</span>()))</span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>    )</span></code></pre></div>
+<p>With the precursors done, we can finally begin solving the problem.
+Let’s define <code>literal_listener</code>:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> literal_listener(x):</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">match</span> x:</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> Utterances.OBJECT:</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> <span class="bu">frozenset</span>((</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>                Object.WHITE_SQUARE.value,</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>                Object.BLACK_SQUARE.value,</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>                Object.WHITE_DOT.value</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>            ))</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> Utterances.SQUARE:</span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> <span class="bu">frozenset</span>((</span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>                Object.WHITE_SQUARE.value,</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>                Object.BLACK_SQUARE.value</span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>            ))</span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> Utterances.WHITE_OBJECT:</span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> <span class="bu">frozenset</span>((</span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>                Object.WHITE_SQUARE.value,</span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>                Object.WHITE_DOT.value</span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>            ))</span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> Utterances.WHITE_SQUARE:</span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> <span class="bu">frozenset</span>((Object.WHITE_SQUARE.value,))</span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>        <span class="cf">case</span> Utterances.NOTHING:</span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> <span class="bu">frozenset</span>()</span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>    <span class="cf">assert</span> <span class="va">False</span>, <span class="ss">f'value not found: </span><span class="sc">{</span>x<span class="sc">}</span><span class="ss">'</span></span></code></pre></div>
+<p>Here I’m using <a href="https://docs.python.org/3/whatsnew/3.10.html#pep-634-structural-pattern-matching">Structural Pattern Matching</a> available in Python
+3.10+. The annoying <code>.value</code> is to convert from the objects to integers
+as I mentioned above.</p>
+<p>Also note the use of <code>frozenset</code>. If we just used <code>set</code>, we’d get an
+<code>TypeError: unhashable type: 'set'</code> error. This occurs since Sage will
+attempt to use the inputs as keys into a dictionary, which requires the
+type to be hashable. <code>frozenset</code> can be hashed, since it isn’t mutable.</p>
+<p>At long last, we can get the answer to the question. Here’s part (a):</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">&quot;speaker&quot;</span>)</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>speaker <span class="op">=</span> maybe_left_adjoint(PW, U, literal_listener)</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> p <span class="kw">in</span> PW.<span class="bu">list</span>():</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(p, <span class="st">&quot;-&gt;&quot;</span>, speaker(p))</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;is speaker left adjoint to literal_listener?&quot;</span>,</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    is_left_adjoint(PW, U, speaker, literal_listener),</span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<p>which outputs:</p>
+<pre><code>speaker
+{} -&gt; Utterances.NOTHING
+{2} -&gt; Utterances.SQUARE
+{1} -&gt; Utterances.WHITE_SQUARE
+{1, 2} -&gt; Utterances.SQUARE
+{3} -&gt; Utterances.WHITE_OBJECT
+{1, 3} -&gt; Utterances.WHITE_OBJECT
+{2, 3} -&gt; Utterances.OBJECT
+{1, 2, 3} -&gt; Utterances.OBJECT
+is speaker left adjoint to literal_listener? True</code></pre>
+<p>and we can also do the extra credit:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>()</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(<span class="st">&quot;pragmatic_listener&quot;</span>)</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>pragmatic_listener <span class="op">=</span> maybe_left_adjoint(U, PW, speaker)</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> q <span class="kw">in</span> U.<span class="bu">list</span>():</span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    <span class="bu">print</span>(q, <span class="st">&quot;-&gt;&quot;</span>, pragmatic_listener(q))</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;is pragmatic_listener left adjoint to speaker?&quot;</span>,</span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>    is_left_adjoint(U, PW, pragmatic_listener, speaker),</span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<p>which outputs:</p>
+<pre><code>pragmatic_listener
+Utterances.NOTHING -&gt; {}
+Utterances.WHITE_SQUARE -&gt; {}
+Utterances.WHITE_OBJECT -&gt; {3}
+Utterances.SQUARE -&gt; {2}
+Utterances.OBJECT -&gt; {2, 3}
+is pragmatic_listener left adjoint to speaker? False</code></pre>
+<p>I think the extra credit problem is actually wrong: <code>pragmatic_listener</code> (<span class="math inline">L'</span>)
+isn’t left adjoint to <code>speaker</code> (<span class="math inline">S</span>). In particular:</p>
+<p><span class="math display">\texttt{white\_square} \not\le S(L'(\texttt{white\_square}))</span></p>
+<p>since <span class="math inline">L'(\texttt{white\_square}) = \emptyset</span> and <span class="math inline">S(\emptyset) = \texttt{nothing}</span>.
+This contradicts Proposition 1.101 mentioned above, so we cannot have
+<span class="math inline">L' \vdash S</span>. I’m not sure if this is a problem with the setup of this
+particular exercise or also a problem with the <a href="https://reubencohngordon.com/blog/informativity-and-galois-connections/">original blog
+post</a>, and not yet sure what additional conditions are
+necessary to make things work out!</p>
+<p>If you’d like to play with the code, <a href="https://sagecell.sagemath.org/?z=eJzFVU1v2kAQvSPxH0ZcsCXHapOekJIqSWmSNgrQgjhUFXLMmDgxXrDXEenHf--Md43X2CRVDq0vLLsz7719szsbJGIJGGdLCJcrkUjo07jdarf8yEtTGNzeoy8tnrR77RbQN728GvdnX0eT0y99OIa3avbs-vT8czl7aMZ-GIxp6ohR263hlMYrkaJM3TMhIvTia0_K0EfryIEsxVma3fLq8TjJ0FZJSsxESky82Me0Imhw9ql_zgzv1P-tiCNTxDbq8Llt3AzGl1c3FzTxRjFPaDhktZYK0D_8lXKccvJbOcz_lkGu4nKMPFeJ-u7sTzLFvyq1gdXEfBWAmnouVfvYQFvPLcZUa13ugA9lkMW-pAOSFiczwXnmI6_PMYCl93SLswgDOfPm9yKMpTV0YOTAojgXnU7nInzEGBbQgxEcnAAFJCizJAZ5h8C5oHNdlXIV1FZgLjCFWEjATZhKOqIx0Ycxzl0iYDWcyIoCa1VQ86eZlGqratXIXSISlrWGQCSwhjCmuYjwLRvCAIZuhNaK9mKtbdsuc-2CT4MHyi9mD9PZUpBMEaM2IjCMOL9D_4GRA_JiyF6MKAOKDLUVA9iLIkOyNWI9gbWxCdV6su1c9caBJxY-dBOMPBmKOJ2FXG0pEqtQbRv6GooVNNXL0OjF80r5_HIfvw5gsSvb0NzkR7nKuGYELQ9ZSjWCXbDKWnCB9d5XauOqYnZTWm7Zmv1SRawXumKRMinK_YtmHIAxJuS4NmfpSf8ONsb58r0U6w2hVz1oxTlJxA-MuYvtHET-VI-vXE_30YsydPbGmt3-pdjtG6ACq3GmdbsbUvD_a0N_r9Nsp_9G7astNUlelLpf2HMUuvO_hK4R6FlHau0fvShFuivdHD_vtoGgRtuDn5vfXXU_Vgm3jU66Qu8Bkw4B6CG90E2PwZQeH6d2oyitvL9TfRO1WMVAV717cNJ1QMPzpS_YdaOizllwV54KKWp87zu6jLX-p_RpnAahzvY5VNy2YcIq8RbUEUJ_G97JNe7ONltDtMyuqbUjeWuaNBmyLgyp43Nnq3vToGPXJs291x0tsY5UymZ__gAb2e_b&amp;lang=sage&amp;interacts=eJyLjgUAARUAuQ==">here it is on SageMathCell</a>.</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-05-31
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

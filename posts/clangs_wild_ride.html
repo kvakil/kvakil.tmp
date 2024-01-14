@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Clang and GCC add Smis showdown</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Clang and GCC add Smis showdown</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p><em>Assumed</em>: knowledge of x86 assembly.</p>
+<p>In <a href="quicker_smi_add_v8.html">a previous post</a>, I gave the gcc output for this code:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="dt">uint32_t</span> add_smi_smi<span class="op">(</span><span class="dt">uint32_t</span> x<span class="op">,</span> <span class="dt">uint32_t</span> y<span class="op">,</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>                     <span class="dt">uint32_t</span> <span class="op">(*</span>bailout<span class="op">)())</span> <span class="op">{</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint32_t</span> s<span class="op">;</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>__builtin_add_overflow<span class="op">(</span>x<span class="op">,</span> y<span class="op">,</span> <span class="op">&amp;</span>s<span class="op">)</span> <span class="op">||</span> <span class="op">(</span>s <span class="op">&amp;</span> <span class="dv">3</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> bailout<span class="op">();</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> s<span class="op">;</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Here is gcc’s output again:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode nasm"><code class="sourceCode nasm"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>add_smi_smi<span class="op">(</span>unsigned int<span class="op">,</span> unsigned int<span class="op">,</span> unsigned int <span class="op">(*)()):</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>        <span class="kw">xor</span>     <span class="kw">ecx</span><span class="op">,</span> <span class="kw">ecx</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>        <span class="kw">add</span>     <span class="kw">edi</span><span class="op">,</span> <span class="kw">esi</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>        <span class="kw">mov</span>     <span class="kw">eax</span><span class="op">,</span> <span class="kw">edi</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>        <span class="kw">setc</span>    <span class="kw">cl</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>        <span class="kw">and</span>     <span class="kw">eax</span><span class="op">,</span> <span class="dv">3</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>        <span class="kw">or</span>      <span class="kw">eax</span><span class="op">,</span> <span class="kw">ecx</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>        <span class="cf">jne</span>     <span class="fu">.L6</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>        <span class="kw">mov</span>     <span class="kw">eax</span><span class="op">,</span> <span class="kw">edi</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>        <span class="cf">ret</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="fu">.L6:</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>        <span class="cf">jmp</span>     <span class="kw">rdx</span></span></code></pre></div>
+<p>Here is clang’s output:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode nasm"><code class="sourceCode nasm"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>add_smi_smi<span class="op">(</span>unsigned int<span class="op">,</span> unsigned int<span class="op">,</span> unsigned int <span class="op">(*)()):</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>        <span class="kw">lea</span>     <span class="kw">eax</span><span class="op">,</span> <span class="op">[</span><span class="kw">rdi</span> <span class="op">+</span> <span class="kw">rsi</span><span class="op">]</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>        <span class="kw">add</span>     <span class="kw">edi</span><span class="op">,</span> <span class="kw">esi</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">jc</span>      <span class="fu">.LBB0_3</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>        <span class="kw">and</span>     <span class="kw">eax</span><span class="op">,</span> <span class="dv">3</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>        <span class="cf">jne</span>     <span class="fu">.LBB0_3</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>        <span class="kw">mov</span>     <span class="kw">eax</span><span class="op">,</span> <span class="kw">edi</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>        <span class="cf">ret</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="fu">.LBB0_3:</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>        <span class="cf">jmp</span>     <span class="kw">rdx</span></span></code></pre></div>
+<p>I was really surprised by clang’s output here! <code>lea eax, [rdi + rsi]</code>
+and <code>add edi, esi</code> both compute the sum! So clang decides to the two
+numbers twice, rather than simply adding and then copying the result. I
+found an answer on <a href="https://stackoverflow.com/questions/6323027/lea-or-add-instruction">StackOverflow</a> explaining why:</p>
+<blockquote>
+<p>One significant difference between <code>LEA</code> and <code>ADD</code> on x86 CPUs is the
+execution unit which actually performs the instruction. Modern x86
+CPUs are superscalar and have multiple execution units that operate in
+parallel, with the pipeline feeding them somewhat like round-robin
+(bar stalls). Thing is, <code>LEA</code> is processed by (one of) the unit(s)
+dealing with addressing (which happens at an early stage in the
+pipeline), while <code>ADD</code> goes to the ALU(s) (arithmetic / logical unit),
+and late in the pipeline. That means a superscalar x86 CPU can
+concurrently execute a <code>LEA</code> and an arithmetic/logical instruction.</p>
+</blockquote>
+<p>Cool stuff. In my silly microbenchmark they were the same speed, and
+gcc’s machine code was shorter, so I showed that. But I’m not sure
+which would perform better in the context of surrounding code.</p>
+<p>Here’s a <a href="https://godbolt.org/z/rboKeazrE">Godbolt link</a> for this code.</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-02-02
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

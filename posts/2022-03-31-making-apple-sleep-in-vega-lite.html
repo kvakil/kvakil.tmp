@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Remaking Apple Health's Sleep Graph in Vega-Lite</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Remaking Apple Health's Sleep Graph in Vega-Lite</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'data'." href="../tags/data.html" rel="tag">data</a></p>
+        <p>Apple Health has a very intuitive visualization of your nap time:</p>
+<center>
+<img src="../assets/apple-health-vis.png" />
+</center>
+<p>I wanted to rebuild this visualization in Vega-Lite. There were a lot of
+little snags I encountered doing so, so I decided to write them down so
+I don’t forget them. But first, let’s see my reproduction!</p>
+<script type="text/javascript" src="../assets/vega@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-lite@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-embed@6.js" defer></script>
+<script type="text/javascript" src="../assets/apple-health-vl.js" defer></script>
+<center>
+<div id="vis" style="width: 555px;max-width:100%">
+
+</div>
+<noscript>
+<img src="../assets/apple-health-vl.png">
+</noscript>
+<p>
+<a href="https://vega.github.io/editor/#/url/vega-lite/N4IgJAzgxgFgpgWwIYgFwhgF0wBwqgegIDc4BzJAOjIEtMYBXAI0poHsDp5kTykBaADZ04JAKyUAVhDYA7EABoQAdxoATemhBQ5mJDVlwATooxwaZLGgAsABltK1caEZo5M7eegiC4cHAAEbKRGAR4IcKYemL5aAMq+-qZqSHpooMRIggzOaADaoCmYkegATLalpfy2AMz8pdamEHpGmFr2qACMNaZwsmrtAJxdnSAAvgqFqSUg5ZXVdaViTS1tZTVdpb397QAcm+OTIEUzc1W19QBsK0itWqUbtgDs2wPoz12NE1PF9xXnixeSmatzWs1KqGsQJAfTeIFsl1QYi+RxOf3mF1Kuxud3etlQD1eQ1QNVshx+p3+C3qgxxYNsnRJjSUsOJ5XJx2m6IB-FJdPa+L5LJ270RfLGAF0JiBMEYkLIIAAzNhGBD5UBQLJQBiCLnocJwAAKtwgcAAFEUGAhKCDWgoAgByACkAAlUE6ALIOgCUpiQEC0tswAH0Tgbgzg2BAIDQmIIAJ7B5RGORkUNIeMczWCbW637oS3WoMBAB8js6pQdAQA-AFCzbVuniuHI9HYwmkynZGmUvGAqgwjQIgB5RWK02YM0O3sO+31oNNuAtqMxuOJ5Op9Px31Kf2BxthoeRb7aLU6vUyo-Goymi2pK2UWH251uz0+v0B9CwxfhhAGBgQFuWZnnmMwGqO45LlOM5zve1rfoeETBn+sgAVuO4gHuX79D+R7ATm575peEQAGIqsgk4Gtet71icz5OgAmvwToIMxag+vRSDvrun6csUi7jBKSjIEYADW6QyvGOAzEwtyHDCsg6GoBhkBJAAeEmKjQcCCHCJwCUomBSTMshsChWRRHQsSoKhgiCMCKprLZ9mYWpNCfqAZCuG8so5I4Zn6LIADCbCCCqWjCJYmBeRmpi6kwOkAILdtZtjStAWQlKAOBIGoyndmgtiUKUYzSpmqCgFpOlwguiGRIZxlaMUCCRnKghNI5WhONAsIqX6bkeZeMQlM5SjKqqqRaE6ACSAROjgpgqtpshgq4UXJAFBghWFJjoJFWAxZm6XZllknSU1eFKLINBQDMMBsAwJilUo8ZbBVIBVbpWgIdMBpRI1+qIK1FnSjoO0SZk2QzAAxLsgxwLdUDyZgbChR4C2oAUH3aV9BZcoZVkzAAIlyJ6fTVqyWcN8SJIEcSU2TONwqyBPU+gCR+IEACiOySqVQA" target="_blank">Open in Vega Editor.</a>
+</p>
+</center>
+<p>It is not pixel-perfect, but I’m pretty happy with how it turned out.
+If you have Javascript enabled, you can also try out the tooltips.</p>
+<p>Anyway, let’s see how it’s made. First, some boilerplate:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;$schema&quot;</span><span class="fu">:</span> <span class="st">&quot;https://vega.github.io/schema/vega-lite/v5.json&quot;</span><span class="fu">,</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;width&quot;</span><span class="fu">:</span> <span class="st">&quot;container&quot;</span><span class="fu">,</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;height&quot;</span><span class="fu">:</span> <span class="dv">400</span><span class="fu">,</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;description&quot;</span><span class="fu">:</span> <span class="st">&quot;sleep over time&quot;</span><span class="fu">,</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Sleep&quot;</span><span class="fu">,</span></span></code></pre></div>
+<p>Next, we’ll load in some sample data I made up. The field names should
+be self-explanatory:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>  <span class="er">&quot;data&quot;:</span> <span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;values&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2022-03-24&quot;</span><span class="fu">,</span> <span class="dt">&quot;start&quot;</span><span class="fu">:</span> <span class="st">&quot;00:13&quot;</span><span class="fu">,</span> <span class="dt">&quot;end&quot;</span><span class="fu">:</span> <span class="st">&quot;09:11&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2022-03-25&quot;</span><span class="fu">,</span> <span class="dt">&quot;start&quot;</span><span class="fu">:</span> <span class="st">&quot;23:12&quot;</span><span class="fu">,</span> <span class="dt">&quot;end&quot;</span><span class="fu">:</span> <span class="st">&quot;08:12&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2022-03-26&quot;</span><span class="fu">,</span> <span class="dt">&quot;start&quot;</span><span class="fu">:</span> <span class="st">&quot;23:07&quot;</span><span class="fu">,</span> <span class="dt">&quot;end&quot;</span><span class="fu">:</span> <span class="st">&quot;07:14&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2022-03-27&quot;</span><span class="fu">,</span> <span class="dt">&quot;start&quot;</span><span class="fu">:</span> <span class="st">&quot;22:47&quot;</span><span class="fu">,</span> <span class="dt">&quot;end&quot;</span><span class="fu">:</span> <span class="st">&quot;06:54&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2022-03-28&quot;</span><span class="fu">,</span> <span class="dt">&quot;start&quot;</span><span class="fu">:</span> <span class="st">&quot;00:23&quot;</span><span class="fu">,</span> <span class="dt">&quot;end&quot;</span><span class="fu">:</span> <span class="st">&quot;09:30&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2022-03-29&quot;</span><span class="fu">,</span> <span class="dt">&quot;start&quot;</span><span class="fu">:</span> <span class="st">&quot;01:34&quot;</span><span class="fu">,</span> <span class="dt">&quot;end&quot;</span><span class="fu">:</span> <span class="st">&quot;09:20&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span><span class="dt">&quot;date&quot;</span><span class="fu">:</span> <span class="st">&quot;2022-03-30&quot;</span><span class="fu">,</span> <span class="dt">&quot;start&quot;</span><span class="fu">:</span> <span class="st">&quot;00:30&quot;</span><span class="fu">,</span> <span class="dt">&quot;end&quot;</span><span class="fu">:</span> <span class="st">&quot;06:30&quot;</span><span class="fu">}</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="er">,</span></span></code></pre></div>
+<p>Note that this sample data is a little weird. In particular, it’s not
+clear which <code>"date"</code> that the <code>"start"</code> column corresponds to. For
+example, the start time for the first row is <code>00:13</code> which probably
+means <code>2022-03-24 00:13</code>, but the second row is <code>23:12</code> which probably
+means <code>2022-03-24(!) 23:12</code>. So there is some weirdness around midnight,
+which we’ll need to handle now:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>  <span class="er">&quot;transform&quot;:</span> <span class="ot">[</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;calculate&quot;</span><span class="fu">:</span> <span class="st">&quot;timeParse(datum.start, '%H:%M')&quot;</span><span class="fu">,</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;as&quot;</span><span class="fu">:</span> <span class="st">&quot;start_datetime_possibly_wrong_day&quot;</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="ot">,</span></span></code></pre></div>
+<p>We start by parsing <code>datum.start</code> as <code>hours:minutes</code>. We call in
+<code>start_datetime_possibly_wrong_day</code> because of the issue described above
+where we’ll want to count morning hours as belonging to the “next day”.</p>
+<p>In Vega-Lite, <code>start_datetime_possibly_wrong_day</code> confusingly <em>does</em>
+have a date even though it was parsed as <code>%H:%M</code>. Under the hood
+Vega-Lite is using
+<a href="https://github.com/d3/d3-time-format">d3-time-format</a>, which species
+that <a href="https://github.com/d3/d3-time-format/blob/fcb2fdc9a1dcb239f0efd75ba861bc58aad6b97a/test/parse-test.js#L193">the date will be set to
+<code>1900-01-01</code></a>.</p>
+<p>You could try to fix it so that we have the correct dates, but we’ll see
+below that this behavior is actually desirable. Let’s fix it so that
+the datetime is “correct” for hours happening before 12pm by adding an
+extra day:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode json allow-wrap"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;calculate&quot;</span><span class="fu">:</span> <span class="st">&quot;datum.start &gt; '12' ? datum.start_datetime_possibly_wrong_day : timeOffset('day', datum.start_datetime_possibly_wrong_day)&quot;</span><span class="fu">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;as&quot;</span><span class="fu">:</span> <span class="st">&quot;start_datetime&quot;</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="er">,</span></span></code></pre></div>
+<p>Now the starting times are mapped correctlyish. For example:</p>
+<ul>
+<li><code>00:13</code> gets mapped to <code>1900-01-02 00:13</code></li>
+<li><code>23:12</code> gets mapped to <code>1900-01-01 23:12</code></li>
+</ul>
+<p>We’ll similarly manipulate the <code>end</code> time. Unlike <code>start</code>, we’ll always
+want to go to the next day:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode json allow-wrap"><code class="sourceCode json"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;calculate&quot;</span><span class="fu">:</span> <span class="st">&quot;timeParse(datum.end, '%H:%M')&quot;</span><span class="fu">,</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;as&quot;</span><span class="fu">:</span> <span class="st">&quot;end_datetime_minus_day&quot;</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="er">,</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;calculate&quot;</span><span class="fu">:</span> <span class="st">&quot;timeOffset('day', datum.end_datetime_minus_day)&quot;</span><span class="fu">,</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;as&quot;</span><span class="fu">:</span> <span class="st">&quot;end_datetime&quot;</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="er">,</span></span></code></pre></div>
+<p>Finally, we parse the <code>date</code>, then immediately format it using <code>%a</code>.
+d3-time-format <a href="https://github.com/d3/d3-time-format/blob/d6feb945baa4b7a45898a9ca926ebca044e20657/README.md#locale_format">defines
+%a</a>
+as “abbreviated weekday name”:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode json allow-wrap"><code class="sourceCode json"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;calculate&quot;</span><span class="fu">:</span> <span class="st">&quot;timeFormat(timeParse(datum.date, '%Y-%m-%d'), '%a')&quot;</span><span class="fu">,</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;as&quot;</span><span class="fu">:</span> <span class="st">&quot;date_date&quot;</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>  <span class="er">],</span></span></code></pre></div>
+<p>We’re almost there. We’ll need to set up the axes next. I adapted most
+of this from the <a href="https://vega.github.io/vega-lite/examples/bar_gantt.html">Gantt
+Chart example</a>
+in the Vega-Lite documentation.</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>  <span class="er">&quot;mark&quot;:</span> <span class="fu">{</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;bar&quot;</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="er">,</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  <span class="er">&quot;encoding&quot;:</span> <span class="fu">{</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;x&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;date_date&quot;</span><span class="fu">,</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;nominal&quot;</span><span class="fu">,</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;sort&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;axis&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;grid&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;domainColor&quot;</span><span class="fu">:</span> <span class="st">&quot;lightgray&quot;</span><span class="fu">,</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;labelAngle&quot;</span><span class="fu">:</span> <span class="dv">0</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">},</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;scale&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;padding&quot;</span><span class="fu">:</span> <span class="fl">0.2</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span></code></pre></div>
+<p>Trickily, the <code>x</code>-axis has type <code>nominal</code> rather than <code>temporal</code>. If we
+do <code>temporal</code>, then everything comes out smushed together because
+<code>temporal</code> is a continuous scale (<a href="https://vega.github.io/editor/#/url/vega-lite/N4IgJAzgxgFgpgWwIYgFwhgF0wBwqgegIDc4BzJAOjIEtMYBXAI0poHsDp5kTykBaADZ04JAKyUAVhDYA7EABoQAdxoATemhBQ5mJDVlwATooxwaZLGgAsABltK1caEZo5M7eegiC4cHAAEbKRGAR4IcKYemL5aAMq+-qZqSHpooMRIggzOaADaoCmYkegATLalpfy2AMz8pdamEHpGmFr2qACMNaZwsmrtAJxdnSAAvgqFqSUg5ZXVdaViTS1tZTVdpb397QAcm+OTIEUzc1W19QBsK0itWqUbtgDs2wPoz12NE1PF9xXnixeSmatzWs1KqGsQJAfTeIFsl1QYi+RxOf3mF1Kuxud3etlQD1eQ1QNVshx+p3+C3qgxxYNsnRJjSUsOJ5XJx2m6IB-FJdPa+L5LJ270RfLGAF0JiBMEYkLIIAAzNhGBD5UBQLJQBiCLnocJwAAKtwgcAAFEUGAhKCDWgoAgByACkAAlUE6ALIOgCUpiQEC0tswAH0Tgbgzg2BAIDQmIIAJ7B5RGORkUNIeMczWCbW637oS3WoMBAB8js6pQdAQA-AFCzbVuniuHI9HYwmkynZGmUvGAqgwjQIgB5RWK02YM0O3sO+31oNNuAtqMxuOJ5Op9Px31Kf2BxthoeRb7aLU6vUyo-Goymi2pK2UWH251uz0+v0B9CwxfhhAGBgQFuWZnnmMwGqO45LlOM5zve1rfoeETBn+sgAVuO4gHuX79D+R7ATm575peETXre9YnM+ToAJr8E6CC0Wo767p+nLFIu4wSkoyBGAA1ukMrxjgMxMLchwwrIOhqAYZD8QAHvxio0HAghwic7FKJgglgYgkZyoIURHgAqrIdBaL2BkxCUqGCIIwIqms1m2Zhsk0J+oBkK4byyjkjhsMgBgAMJsIIKpaMIliYB5GamLqTDKQAgt2sSoLY0rQFkJSgDgSBqFJ3ZoLYlClGM0qZqgoCKcpcILohkQaVpWjFAgulZE09lmc4UCwtJfouW5l6WWgjlKMqqqpFoToAJIBE6OCmCqSmyGCrgRckfn6LIQUhSY6DhVgUWZml2aZQJQmNXhSgmV1WgwGwDAmCVSjxls5UgJVKlaAh0wGlEDX6jpKqtdKOjbfxmTZDMADEuyDHAXVQGJmBsMFHhzagBRvUpH0FlyGl0MlIAACJcie73VasFkEwkfiBHEFOk1jcKsnjg3oNT-gBAAojskrA3IikyeVJVAA" target="_blank">example in Vega
+Editor</a>). By keeping it as <code>nominal</code>, we can control the
+padding in between the bars by using <code>scale.padding</code>. There are ways to fix this,
+but I wasn’t using any of the features of temporal anyways, so
+nominal felt easier.</p>
+<p>Also, we’ll need to stop Vega-Lite from sorting the axis labels
+alphabetically, which we’ve done by passing <code>"sort": null</code>.</p>
+<p>Now we’ll define the <code>y</code> axis. Taking our cue from the Gantt chart
+example above, we’ll define <code>y</code> and <code>y2</code>:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>    <span class="er">&quot;y&quot;:</span> <span class="fu">{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;start_datetime&quot;</span><span class="fu">,</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;temporal&quot;</span><span class="fu">,</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;sort&quot;</span><span class="fu">:</span> <span class="st">&quot;descending&quot;</span><span class="fu">,</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;axis&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;format&quot;</span><span class="fu">:</span> <span class="st">&quot;%I %p&quot;</span><span class="fu">,</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;orient&quot;</span><span class="fu">:</span> <span class="st">&quot;right&quot;</span><span class="fu">,</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;domainColor&quot;</span><span class="fu">:</span> <span class="st">&quot;lightgray&quot;</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>      <span class="fu">},</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;scale&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;time&quot;</span><span class="fu">,</span></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;nice&quot;</span><span class="fu">:</span> <span class="st">&quot;hour&quot;</span></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="er">,</span></span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>    <span class="er">&quot;y2&quot;:</span> <span class="fu">{</span></span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;end_datetime&quot;</span><span class="fu">,</span></span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;temporal&quot;</span></span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="er">,</span></span></code></pre></div>
+<p>Remember that technically all of our <code>y</code> values have dates in
+<code>1900-01-01</code> and <code>1900-01-02</code>. This ends up working out really well for
+us here. If they were different, then it would not look very good,
+because there’d be large gaps on the y-axis (<a href="https://vega.github.io/editor/#/url/vega-lite/N4IgJAzgxgFgpgWwIYgFwhgF0wBwqgegIDc4BzJAOjIEtMYBXAI0poHsDp5kTykBaADZ04JAKyUAVhDYA7EABoQAdxoATemhBQ5mJDVlwATooxwaZLGgAsABltK1caEZo5M7eegiC4cHAAEbKRGAR4IcKYemL5aAMq+-qZqSHpooMRIggzOaADaoCmYkegATLalpfy2AMz8pdamEHpGmFr2qACMNaZwsmrtAJxdnSAAvgqFqSUg5ZXVdaViTS1tZTVdpb397QAcm+OTIEUzc1W19QBsK0itWqUbtgDs2wPoz12NE1PF9xXnixeSmatzWs1KqGsQJAfTeIFsl1QYi+RxOf3mF1Kuxud3etlQD1eQ1QNVshx+p3+C3qgxxYNsnRJjSUsOJ5XJx2m6IB-FJdPa+L5LJ270RfLGAF0JiBMEYkLIIAAzNhGBD5UBQLJQBiCLnocJwAAKtwgcAAFEUGAhKCcAgBqAIAcid9oClutINaCidAFIAJr8H0IQNqAI+gASqB9AFlHQBKUxICBaT2YAD6JwNaZwbAgEBoTEEAE808ojHIyBmkEWOZrBNrdb90O7KKmAgA+J2dUrOgD8btSVtbqyrxSzObzBeLpfLskrKSLAVQYRoEQA8orFabMGbHQvHd6W6nR3Bx7n84WS2WK1WiwmlEmUyPM6vIt9tFqdXqZa-jUZTRag7WraDrOs6DotrC3qOv6gbBj6oYRlGsb3iAj7oLCJ5ZggBgMBAt61p+jYzAaG5bqeu77oeQGUJhL4RGmOGyHht6oehML9Fhr6EfWX5Nj+EQAGIqsgO4Gn+AEtic0GwUGIbxjJSDxomybNtMJ7jBKSjIEYADW6QykWOAzEwtyHBxOhqAYZAGQAHgZio0HAghwicGlKJgRkzLIbBMVkUR0LEqDMYIgjAiqawhWFaG2TQqmgGQrhvLKOSOL5+iyAAwmwggqlowiWJgiXVqYupMM5ACCc5BbY0rQFkJSgDgSBqFZc5oLYlClGM0o1qgoCOc5cLHvRkQeV5WjFAgOZyoITQRVoTjQLC1mJrF8U-jEJRRUoyqqqkWg+gAkmGOCmCqTmyGCriFck6UGNluUmOgBVYMVNZ1XWjWGcZk3cUosg0FAMwwGwDAmD1ShFls-UgINLlaHR0wGlEE36ogM3+dKOhPQZmTZDMADEuyDHAwNQOZmBsDlHhnagBRw05CNqb8HmBTMAAiXLvvDw2rAFW3xIkgRxPzPNM3CrJs4L6AJH4gQAKI7JK2NyI5Nn9T1QA" target="_blank">example in Vega
+editor</a>).</p>
+<p>Lastly some finishing touches. We’ll copy the color from Apple’s
+visualization and add a toolbar:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>    <span class="er">&quot;color&quot;:</span> <span class="fu">{</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;value&quot;</span><span class="fu">:</span> <span class="st">&quot;#89ecec&quot;</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span><span class="er">,</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    <span class="er">&quot;tooltip&quot;:</span> <span class="ot">[</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;date_date&quot;</span><span class="fu">,</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Date&quot;</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;start&quot;</span><span class="fu">,</span></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Sleep Start&quot;</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>      <span class="fu">{</span></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;end&quot;</span><span class="fu">,</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Sleep End&quot;</span></span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>  <span class="er">}</span></span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a><span class="er">}</span></span></code></pre></div>
+<p>and volià!</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-03-31
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

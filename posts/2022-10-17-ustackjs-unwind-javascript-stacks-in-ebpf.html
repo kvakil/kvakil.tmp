@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Unwinding Node.js/V8 Javascript stacks in eBPF</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Unwinding Node.js/V8 Javascript stacks in eBPF</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p><code>ustackjs</code> is a Node.js/V8 Javascript stack unwinder in eBPF, allowing
+you to view backtraces for native C++ code. It is <a href="https://git.sr.ht/~kvakil/ustackjs">available here</a>.</p>
+<p>To see how to use it, let’s consider the following Javascript program.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">foo</span>() { <span class="cf">return</span> <span class="kw">new</span> <span class="bu">Uint8Array</span>(<span class="dv">1024</span>)<span class="op">;</span> }</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">bar</span>() { <span class="fu">foo</span>()<span class="op">;</span> }</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">bar</span>()<span class="op">;</span></span></code></pre></div>
+<p>Allocating a <code>Uint8Array</code> eventually calls a C++ function known as
+“<code>v8::Isolate::AdjustAmountOfExternalAllocatedMemory</code>”. You can trace calls to
+this function using <code>ustackjs</code>. First, we will need to get the <em>mangled</em> name:</p>
+<pre class="console"><code>$ nm `which node` | grep AdjustAmountOfExternalAllocatedMemory
+0000000000b9ac00 T _ZN2v87Isolate37AdjustAmountOfExternalAllocatedMemoryEl
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...</code></pre>
+<p>Now we can pass that to <code>ustackjs.py</code> to see all the callsites.</p>
+<pre class="console allow-wrap"><code>$ sudo python3 ustackjs.py --node `which node` \
+        _ZN2v87Isolate37AdjustAmountOfExternalAllocatedMemoryEl
+
+5845 5845 5845 12888.364267112: 1 event:
+ 561614bf9f40 v8::internal::Builtin_ArrayBufferConstructor(int, unsigned long*, v8::internal::Isolate*)+0x120 ([node])
+ 5616155ecd79 Builtins_CEntry_Return1_DontSaveFPRegs_ArgvOnStack_BuiltinExit+0x39 ([node])
+ 56161556e7ec Builtins_JSBuiltinsConstructStub+0xec ([node])
+ 561615660652 Builtins_CreateTypedArray+0x892 ([node])
+ 5616155de2c7 Builtins_TypedArrayConstructor+0x87 ([node])
+ 56161556e7ec Uint8Array ([js])
+ 561595706add [unknown]
+ 561595706bb6 foo ([js])
+ 561595706cb6 bar ([js])
+#        ...</code></pre>
+<p>There are both C++ functions, like <code>Builtins_CreateTypedArray</code>, and
+Javascript functions (<code>foo</code> and <code>bar</code>).</p>
+<p>The output is in <code>perf-script(1)</code> format, which lets you import it into
+various tools like <a href="https://speedscope.app">Speedscope</a>.</p>
+<p>This functionality of tracing calls to a particular native function is
+useful, but of course it may not quite be what you want. For example,
+you may want to trace system calls, capture the arguments passed to the
+function, etc.. Since the tool is open-source, you can modify
+<code>ustackjs</code> to your liking in order to capture whatever information you
+need.</p>
+<p>To my knowledge, this is the first tool of its class for Node.js/V8.
+Similar tools exist for other interpreted languages, like Python or
+Ruby, but Javascript is particularly complicated because of its JIT. And
+while tools like <code>perf</code> or <code>gdb</code> can be used for native stack traces,
+neither of those support low-overhead ways to get backtraces
+like eBPF can!</p>
+<h2 id="how-it-works">How it works</h2>
+<p>I adapted the algorith here from <a href="https://github.com/nodejs/llnode/blob/2ae10dd5b47d52c1ff6d7f4869adb164f300ea10/src/llv8-inl.h#L1108">llnode</a>, which can get the backtrace
+from a coredump. There is not too much to it, since V8 actually makes
+unwinding pretty easy. Essentially the register <code>rbp</code> points to the
+saved frame pointer (i.e., the <code>rbp</code> of the previous function). For
+Javascript frames, you can traverse some nearby objects to eventually
+get to the name of the function. For C++ frames, you’ll realize that it
+doesn’t work the Javascript unwinding fails. Then you can set <code>rbp &lt;- old rbp</code> and keep unwinding, until you eventually reach some maximum
+limit or fail to unwind.</p>
+<p>Here are the gory details in a picture, showing the pointers you need to
+traverse to get the name of a Javascript function.</p>
+<pre><code>┌──────────────────────────┐
+│ return address           │
+├──────────────────────────┤
+│ saved frame pointer    ◄─┼─ rbp
+├──────────────────────────┤
+│ &quot;context&quot;                │
+├──────────────────────────┤
+│ JSFunction pointer   ────┼──┐
+└──────────────────────────┘  │
+                              │
+┌──────────────────────────┐  │
+│ JSFunction map         ◄─┼──┘
+├──────────────────────────┤
+│                          │
+│          ...             │
+│                          │
+├──────────────────────────┤
+│ SharedFunctionInfo ptr  ─┼───┐
+└──────────────────────────┘   │
+                               │
+┌──────────────────────────┐   │
+│ SharedFunctionInfo map ◄─┼───┘
+├──────────────────────────┤
+│                          │
+│          ...             │
+├──────────────────────────┤
+│ name or scope info ptr  ─┼───┐
+└──────────────────────────┘   │
+                               │
+┌──────────────────────────┐   │
+│ ScopeInfo map          ◄─┼───┘
+├──────────────────────────┤
+│          ...             │
+├──────────────────────────┤
+│ context_local_count      │
+├──────────────────────────┤
+│  followed by             │
+│  2 * context_local_count │
+│  8-byte words            │
+├──────────────────────────┤
+│ name pointer             ┼───┐
+└──────────────────────────┘   │
+                               │
+┌──────────────────────────┐   │
+│ String map             ◄─┼───┤
+├──────────────────────────┤   │
+│ length of string         │   │
+├──────────────────────────┤   │
+│ string data: &quot;foo&quot;       │   │
+└──────────────────────────┘   │
+                               │
+┌──────────────────────────┐   │
+│Root map pointer        ◄─┼───┘
+├──────────────────────────┤
+│instance type             │
+└──────────────────────────┘</code></pre>
+<h2 id="is-it-safe-to-use">Is it safe to use?</h2>
+<p>I have not formally measured the overhead of this, my current guesstimate is
+somewhere in the double-digit microseconds per stack trace. I recommend running
+with a low value of <code>--max-depth</code> and <code>--max-function-name-length</code>, and turning
+it up carefully until you get enough information to debug whatever you’re
+looking at.</p>
+<h2 id="whats-left-to-do">What’s left to do?</h2>
+<p>This was more of a proof-of-concept, although I’ve already found it
+surprisingly useful. Here are some things which are missing and could be nice
+additions:</p>
+<ul>
+<li>Precisely quantify the performance impact.</li>
+<li>Get various constants from the binary, rather than hardcoding them. <code>llnode</code>
+uses “<code>v8dbg_*</code>” symbols, which lets it work across different Node.js versions.</li>
+<li>Cache some data until a GC occurs. This can avoid pointer chasing, which
+is probably not great for performance.</li>
+<li>Support other types of strings. Currently we only support “one-byte seq strings”.
+This means that we can’t always print out the Javascript function name –
+for example we’ll choke on anything which has unicode. There is a tradeoff
+here in that supporting more types of strings is slower.</li>
+<li>Don’t probe 4 slots for the right string. Right now this copies a hack from
+llnode – it actually tries multiple offsets in <code>ScopeInfo</code> to find the location
+of the function name. We should be able to get the exact slot at the cost
+of some additional code complexity.</li>
+<li>Some support for inlining. It would be nice if we could optionally detect
+inlining and correctly unwind it. This needs to be optional as the performance
+hit is likely quite high.</li>
+<li>Support WebAssembly functions.</li>
+</ul>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-10-17
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

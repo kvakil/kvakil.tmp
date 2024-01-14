@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Blogs I Follow (2022)</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Blogs I Follow (2022)</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'meta'." href="../tags/meta.html" rel="tag">meta</a></p>
+        <p>Here’s a list of blogs I enjoy. I’m going to keep this list updated
+throughout 2022. (Randomly ordered.)</p>
+<div id="blogs-list">
+<ul>
+<li><a href="https://www.philipzucker.com/">Philip Zucker’s Blog</a> (<a href="https://www.philipzucker.com/feed.xml">RSS</a>): tech blog mostly about
+functional programming and compilers stuff. Self-described “lab
+notebook”, so not the best source if you’re looking for highly
+polished posts. Posts I liked: <a href="https://www.philipzucker.com/minikanren-z3py/">Making a “MiniKanren” using
+Z3Py</a>, <a href="https://www.philipzucker.com/translating-z3-to-coq/">Translating My Z3 Tutorial to Coq</a>.</li>
+</ul>
+<ul>
+<li><a href="https://emshort.blog/">Emily Short’s Interactive Story</a> (<a href="https://emshort.blog/feed.xml">RSS</a>): blog (mostly
+newsletter nowadays) about Interactive Fiction. Written by Emily
+Short, who is quite famous in that niche.</li>
+</ul>
+<ul>
+<li><a href="https://www.talospace.com/">Talospace</a> (<a href="https://www.talospace.com/feeds/posts/default?alt=rss">RSS</a>): blog about POWER9/OpenPOWER, mostly
+hardware and operating system reviews.</li>
+</ul>
+<ul>
+<li><a href="https://100r.co/site/log.html">100 Rabbits</a> (<a href="https://100r.co/links/rss.xml">RSS</a>): “small [primarily tech] artist
+collective”.</li>
+</ul>
+</div>
+<script>
+const list = document.getElementById("blogs-list");
+const shuffledListNodes = Array.prototype.filter.call(list.childNodes, (e) => e.tagName === 'UL');
+for (let i = shuffledListNodes.length - 1; i >= 1; i--) {
+    const j = (i * Math.random()) | 0;
+    const tmp = shuffledListNodes[i];
+    shuffledListNodes[i] = shuffledListNodes[j];
+    shuffledListNodes[j] = tmp;
+}
+
+let j = 0;
+for (let i = 0; i < list.childNodes.length; i++) {
+    const e = list.childNodes[i];
+    if (e.tagName === 'UL') {
+        // almost certainly incorrect but it seems random enough
+        list.insertBefore(e, shuffledListNodes[j++]);
+    }
+}
+</script>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-05-30
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

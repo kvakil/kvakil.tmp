@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Introducing datasette-vega-dashboards</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Introducing datasette-vega-dashboards</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'data'." href="../tags/data.html" rel="tag">data</a></p>
+        <p>I recently made a <a href="//datasette.io">Datasette</a> plugin:
+<a href="https://git.sr.ht/~kvakil/datasette-vega-dashboards">datasette-vega-dashboards</a>.
+Datasette is a great tool which lets you explore SQLite databases in
+your browser (and much more, check out the website!).
+datasette-vega-dashboards lets you add Vega/Vega-Lite dashboards to
+Datasette, so you can add graphs and other visualizations on the results
+of SQL queries.</p>
+<figure>
+<img src="../assets/datasette-vega-dashboards-example.png" alt="datasette-vega-dashboards (silly) example image." />
+<figcaption aria-hidden="true">datasette-vega-dashboards (silly) example image.</figcaption>
+</figure>
+<p>It’s different than
+<a href="https://github.com/simonw/datasette-vega">datasette-vega</a>.
+datasette-vega only allows for certain basic built-in visualizations (no
+custom Vega specs). datasette-vega-dashboards is much more focused on
+enabling presentation and supports arbitrary Vega/Vega-Lite.</p>
+<p>Creating an actual Datasette plugin was pretty easy, even for somebody
+like me who doesn’t have much experience with the Python packaging
+ecosystem, I <a href="https://docs.datasette.io/en/stable/writing_plugins.html#starting-an-installable-plugin-using-cookiecutter">just followed the
+documentation</a>
+and it all worked. My main problem is that it does seem very tailored to
+publishing on Github: it comes with some nice Github Actions templates
+which are easy to ignore. However, the <a href="https://datasette.io/plugins">Datasette
+Plugins</a> page is currently generated <a href="https://github.com/simonw/datasette.io/issues/56">via
+the Github API</a>, so my
+great plugin does not appear on the list. Maybe one day I will either
+help fix that issue or just move the plugin over to Github.</p>
+<p><del>Anyway, feel free to check out <a href="https://git.sr.ht/~kvakil/datasette-vega-dashboards">the git repo</a> for more.</del></p>
+<p><strong>Update</strong>: I moved this to
+<a href="https://github.com/kvakil/datasette-vega-dashboards">Github</a>. I also
+learned about the existence of
+<a href="https://github.com/rclement/datasette-dashboards">datasette-dashboards</a>
+which for some reason at the time of writing is not on the Datasette
+website, which is why I missed it. It has some advantages/disadvantages
+versus datasette-vega-dashboards, and I’ll probably keep using mine. :)</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-03-28
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

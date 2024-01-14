@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Expected number of uniform variates which are strictly increasing</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+         <link rel="stylesheet" href="../css/katex.min.css"><script type="text/javascript" defer src="../js/katex.min.js" onload="const macros = {};document.querySelectorAll('.math').forEach((e) =&gt; katex.render(e.textContent, e, {displayMode: e.classList.contains('display'), throwOnError: false, trust: true, macros}))"></script> 
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Expected number of uniform variates which are strictly increasing</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'math'." href="../tags/math.html" rel="tag">math</a></p>
+        <p>Let <span class="math inline">(r_1, r_2, \ldots)</span> be an infinite sequence of iid uniform random
+variates. Let <span class="math inline">K</span> be the largest number such that <span class="math inline">r_1 &lt; r_2 &lt; \cdots &lt; r_K</span>. What is <span class="math inline">\mathbb{E}[K]</span>?</p>
+<p>Note that:</p>
+<p><span class="math display">\mathbb{E}[K] = \sum_{k=1}^{\infty} \text{Pr}[K \ge k].</span></p>
+<p>We have <span class="math inline">K \ge k</span> iff the <span class="math inline">k</span> elements satisify <span class="math inline">r_1 &lt; r_2 &lt; \cdots &lt; r_k</span>, which happens with probability <span class="math inline">1/k!</span>. Therefore:</p>
+<p><span class="math display">\mathbb{E}[K] = \sum_{k=1}^{\infty} \frac1{k!} = e - 1.</span></p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-03-26
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

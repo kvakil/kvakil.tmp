@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Node.js Startup: Speeding up Snapshot Deserialization</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Node.js Startup: Speeding up Snapshot Deserialization</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'nodejs-startup'." href="../tags/nodejs-startup.html" rel="tag">nodejs-startup</a>, <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p>In <a href="../posts/2023-05-10-nodejs-startup-series-profiling.html">the previous
+post</a> of <a href="../tags/nodejs-startup.html">this
+series</a>, we successfully captured a profile of Node.js’s
+startup. Looking at the profile, we see that around 1/3rd of Node.js’s
+startup time was in two functions: <code>v8::internal::Snapshot::Initialize</code>
+and <code>v8::Context::FromSnapshot</code>. But what is a snapshot? A snapshot is
+a serialized version of V8’s heap which can be deserialized later. This
+allows embedders like Node.js to quickly load from a snapshot, rather
+than redoing all their bootstrapping all the time. <a href="https://v8.dev/blog/custom-startup-snapshots">You can learn more
+at V8’s blog.</a></p>
+<p>I also profiled d8, V8’s minimal Javascript shell. It spent a similar 1/3rd of
+its time deserializing from the snapshot, but d8 loads three times faster, so
+the absolute snapshot deserialization time is 3x faster. My next question
+was… what’s in Node.js’s snapshot and why is it so much slower?</p>
+<p>There is a V8 flag we can give called <code>--profile-deserialization</code>, which
+outputs some timings:<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>$ out<span class="op">/</span>Release<span class="op">/</span>d8 <span class="op">--</span>profile<span class="op">-</span>deserialization <span class="op">-</span>e <span class="dv">0</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Verifying snapshot checksum took <span class="dv">0</span><span class="er">.196</span> ms<span class="op">]</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Deserializing isolate <span class="op">(</span><span class="dv">201600</span> bytes<span class="op">)</span> took <span class="fl">1.917</span> ms<span class="op">]</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Deserializing context #<span class="dv">0</span> <span class="op">(</span><span class="dv">49616</span> bytes<span class="op">)</span> took <span class="dv">0</span><span class="er">.356</span> ms<span class="op">]</span></span></code></pre></div>
+<p>whereas for Node.js:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>$ <span class="op">./</span>node_main <span class="op">--</span>profile<span class="op">-</span>deserialization <span class="op">-</span>e <span class="dv">0</span> <span class="op">|</span> head <span class="op">-</span>n3</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Verifying snapshot checksum took <span class="dv">0</span><span class="er">.827</span> ms<span class="op">]</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Deserializing isolate <span class="op">(</span><span class="dv">1449656</span> bytes<span class="op">)</span> took <span class="fl">5.886</span> ms<span class="op">]</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Deserializing context #<span class="dv">3</span> <span class="op">(</span><span class="dv">379640</span> bytes<span class="op">)</span> took <span class="fl">2.526</span> ms<span class="op">]</span></span></code></pre></div>
+<p>Node.js’s serialized isolate and context are both around 7x the size of d8’s,
+which probably explains why deserializing it is slower. An <em>isolate</em> is an
+instance of the V8 engine (along with its heap) while a <em>context</em> is a global
+object of an isolate (an isolate can actually have multiple contexts). Next up
+I was curious what was actually in the heap. Continuing on the flag
+exploration, <code>--serialization-statistics</code> can be used to dump statistics on
+what object types are in the snapshot. I had to pass it to Node.js’s snapshot
+creation script:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode diff"><code class="sourceCode diff"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">diff --git a/tools/snapshot/node_mksnapshot.cc b/tools/snapshot/node_mksnapshot.cc</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>index d6d92ab156..226c1efa0e 100644</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="dt">--- a/tools/snapshot/node_mksnapshot.cc</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="dt">+++ b/tools/snapshot/node_mksnapshot.cc</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -53,6 +53,7 @@ int main(int argc, char* argv[]) {</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a> </span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>   v8::V8::SetFlagsFromString(&quot;--random_seed=42&quot;);</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>   v8::V8::SetFlagsFromString(&quot;--harmony-import-assertions&quot;);</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="va">+  v8::V8::SetFlagsFromString(&quot;--serialization-statistics&quot;);</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>   return BuildSnapshot(argc, argv);</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a> }</span></code></pre></div>
+<p>Here is the output of that, slightly cleaned up &amp; truncated:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>StartupSerializer<span class="op">:</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  Spaces <span class="op">(</span>bytes<span class="op">):</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a> read_only_space       new_space       old_space</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>               <span class="dv">0</span>         <span class="dv">1754464</span>          <span class="dv">192768</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>Instance types <span class="op">(</span>count and bytes<span class="op">):</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>        <span class="dv">65</span>     <span class="dv">956216</span>  new_space  EXTERNAL_ONE_BYTE_STRING_TYPE</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>       <span class="dv">215</span>     <span class="dv">291768</span>  new_space  FIXED_ARRAY_TYPE</span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>      <span class="dv">1004</span>     <span class="dv">192768</span>  old_space  CODE_TYPE</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>      <span class="dv">2492</span>     <span class="dv">139552</span>  new_space  SHARED_FUNCTION_INFO_TYPE</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>      <span class="dv">1728</span>      <span class="dv">61776</span>  new_space  ONE_BYTE_STRING_TYPE</span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>       <span class="dv">194</span>      <span class="dv">47904</span>  new_space  SCOPE_INFO_TYPE</span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>       <span class="dv">355</span>      <span class="dv">42600</span>  new_space  FUNCTION_TEMPLATE_INFO_TYPE</span></code></pre></div>
+<p>Certainly <code>EXTERNAL_ONE_BYTE_STRING_TYPE</code> looks suspicious. Why are we storing
+1 MB of strings in the snapshot?</p>
+<p>It turns out that this megabyte of external string data is Node.js’s Javascript
+code. As an optimization, Node.js includes a copy of all of its Javascript code
+inside its executable via a program called <a href="https://github.com/nodejs/node/blob/9398ff1dea564807378f485deae2eecaf5fde993/tools/js2c.py">js2c</a>. It then uses some
+low-level V8 functionality called <a href="https://v8.github.io/api/head/classv8_1_1String_1_1ExternalStringResourceBase.html">external strings</a> to avoid copying the
+Javascript code on to the Javascript heap. (When using external strings, V8
+will store a pointer to the string data rather than copying the string data.)</p>
+<p>However, when taking a snapshot, V8 will <a href="https://github.com/v8/v8/blob/d2c8fbe9ccd1a6ce5591bb7dd319c3c00d6bf489/src/snapshot/serializer.cc#L633">copy the external string data into
+the snapshot</a>. This meant that the snapshot duplicated external string
+content which was already in the executable. This both bloated the size of the
+snapshot, and the size of the deserialized Javascript heap (since it contained
+the actual Javascript code, rather than just a pointer to it if it used
+external strings).</p>
+<p>Fortunately V8 provides the necessary functionality to allow us to serialize
+snapshots while allowing us to still supply “external” data to the snapshot.
+V8 allows us to register “external references” in the snapshot. When
+serializing the snapshot, we provide a list of external references. V8 will
+replace each external reference with its index in that list. When deserializing
+the snapshot, we provide the same list of external references, and V8 will
+replace each index with the value in the list.</p>
+<p>If we register the references to the external strings, V8 is smart enough to
+avoid copying the external string data into the snapshot and use the external
+reference functionality to properly revive the external strings during
+deserialization. This means that we no longer need to store the string data
+in the snapshot, cutting its size significantly:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>$ <span class="op">./</span>node_main <span class="op">--</span>profile<span class="op">-</span>deserialization <span class="op">-</span>e <span class="dv">0</span> <span class="op">|&amp;</span> head <span class="op">-</span>n3</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Verifying snapshot checksum took <span class="dv">0</span><span class="er">.827</span> ms<span class="op">]</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Deserializing isolate <span class="op">(</span><span class="dv">1449656</span> bytes<span class="op">)</span> took <span class="fl">5.886</span> ms<span class="op">]</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Deserializing context #<span class="dv">3</span> <span class="op">(</span><span class="dv">379640</span> bytes<span class="op">)</span> took <span class="fl">2.526</span> ms<span class="op">]</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>$ <span class="op">./</span>node <span class="op">--</span>profile<span class="op">-</span>deserialization <span class="op">-</span>e <span class="dv">0</span> <span class="op">|&amp;</span> head <span class="op">-</span>n3</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Verifying snapshot checksum took <span class="dv">0</span><span class="er">.443</span> ms<span class="op">]</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Deserializing isolate <span class="op">(</span><span class="dv">434168</span> bytes<span class="op">)</span> took <span class="fl">4.880</span> ms<span class="op">]</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="op">[</span>Deserializing context #<span class="dv">3</span> <span class="op">(</span><span class="dv">379640</span> bytes<span class="op">)</span> took <span class="fl">2.651</span> ms<span class="op">]</span></span></code></pre></div>
+<p><a href="https://github.com/nodejs/node/pull/47055">Doing this</a> speeds up startup by 1ms (4%), and also
+saves 1.0 MiB of memory on each Node.js process:</p>
+<script type="text/javascript" src="../assets/vega@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-lite@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-embed@6.js" defer></script>
+<script type="text/javascript" src="../assets/nodejs-startup-intro-vl.js" defer></script>
+<center>
+<div id="vis-runtime" style="width: 650px;max-width:100%" data-filename="/assets/nodejs-startup-pt1-timings.json" data-title="Runtime of main before &amp; after change">
+
+</div>
+<noscript>
+Sorry, you need Javascript to view this plot. Do you read this blog
+without Javascript? Please email me at <code>ken@kvakil.me</code>.
+</noscript>
+</center>
+<center>
+<div id="vis-memory" style="width: 650px;max-width:100%" data-filename="/assets/nodejs-startup-pt1-memory.json" data-title="Unique set size before &amp; after change">
+
+</div>
+<noscript>
+Sorry, you need Javascript to view this plot. Do you read this blog
+without Javascript? Please email me at <code>ken@kvakil.me</code>.
+</noscript>
+</center>
+<p>There’s probably more startup performance to squeeze out by cutting
+unnecessary data from the snapshot. However there’s a tradeoff: you
+could imagine eagerly adding commonly loaded modules to the snapshot,
+which will improve the startup performance of real-world applications
+which use the preloaded module at the cost of slowing down the minimal
+startup. For now, we’ll take the free lunch win and move on from
+focusing on snapshots for a little, while we continue <a href="../tags/nodejs-startup.html">the rest of the
+series</a>.</p>
+<aside id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes">
+<hr />
+<ol>
+<li id="fn1"><p>You can see a list of V8 flags by doing <code>node --v8-options</code>.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
+</aside>
+    </section>
+    <section class="header">
+        
+        Posted on 2023-05-11
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

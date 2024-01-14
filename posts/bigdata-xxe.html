@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Static Analysis Using Google BigQuery</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Static Analysis Using Google BigQuery</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'security'." href="../tags/security.html" rel="tag">security</a></p>
+        <div role="main">
+<p>Github provides public access to a massive amount of open-source code.
+Github analyzes this source code in order <a href="https://help.github.com/articles/about-security-alerts-for-vulnerable-dependencies/">to create security
+alerts</a>.
+I investigate using Google’s
+<a href="https://cloud.google.com/bigquery/public-data/">BigQuery</a> dataset to
+search for possible security issues, namely XXE attacks.</p>
+<h2 id="xml-external-entity-xxe">XML External Entity (XXE)</h2>
+<p>The <a href="https://www.owasp.org/index.php/XML_External_Entity_(XXE)_Processing">XML External Entity
+attack</a>
+(<a href="https://cwe.mitre.org/data/definitions/611.html">CWE-611</a>) is an
+attack when a misconfigured XML parser takes in untrusted XML input. The
+untrusted input then contains a reference to an “external entity”, which
+causes the parser to do bad things (from a security perspective).</p>
+<p>If you have done any web development, you’ve probably seen XML entities.
+One example is the entity <code>&amp;lt;</code>, which an XML parser expands to the
+literal <code>&lt;</code>. All XML parsers begin by expanding these entities.</p>
+<p>XML also allows you to declare custom entities, for example:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="er">&lt;</span>!ENTITY euro &quot;<span class="dv">&amp;#8364;</span>&quot;&gt;</span></code></pre></div>
+<p>This declares the entity <code>&amp;euro;</code> to expand to the entity <code>&amp;#8364;</code>
+which corresponds to the unicode character <code>€</code>.</p>
+<p>However, the spec also allows for <em>external</em> entities. For example, one
+can write:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="dt">&lt;!DOCTYPE</span> <span class="dt">foo</span> <span class="dt">[</span> <span class="dt">&lt;!ENTITY</span> <span class="dt">xxe</span> SYSTEM <span class="st">&quot;file:///etc/passwd&quot;</span><span class="dt">&gt;</span> <span class="dt">]&gt;</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>&lt;<span class="kw">foo</span>&gt;<span class="dv">&amp;xxe;</span>&lt;/<span class="kw">foo</span>&gt;</span></code></pre></div>
+<p>This indicates that the entity <code>&amp;xxe;</code> should be expanded to the
+contents of the file <code>/etc/passwd</code>. The entity is <em>external</em>, since it
+references something outside of the XML file. If the contents of the XML
+file are returned to the attacker directly, they can use this to read
+the contents of any file. But it turns out that XXEs can be abused to
+leak the contents of any file <em>even if the attacker does not see the
+parsed XML!</em> Explaining this <em>out-of-band XXE</em> variant would take us a
+little off-topic, but you can <a href="https://www.acunetix.com/blog/articles/xml-external-entity-xxe-vulnerabilities/">read the details
+here</a>.</p>
+<p>Unfortunately, Java XML libraries are typically vulnerable as their
+<em>default settings</em> parse external entities, which is rarely what the
+application developer intends. Detecting XXEs via looking at the code is
+very easy since ther are some patterns which are obviously vulnerable.
+Things like command injection and improper deserializers would also be
+good candidates for our basic static analysis.</p>
+<h2 id="bigquerying-the-data">BigQuerying the Data</h2>
+<p>The database of all Github code is a whopping 2 TB of data! I ran the
+following query, which I developed based on a test suite:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co">-- Determines if NEEDLE is a substring of HAYSTACK</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="kw">CREATE</span> <span class="kw">TEMPORARY</span> <span class="kw">FUNCTION</span> STRSTR(haystack STRING, needle STRING) <span class="kw">AS</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  (<span class="fu">CAST</span>(STRPOS(haystack, needle) <span class="kw">AS</span> BOOL));</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> c.<span class="kw">id</span>, c.content, f.repo_name, f.<span class="fu">ref</span>, f.path</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="kw">FROM</span> `bigquery<span class="op">-</span><span class="kw">public</span><span class="op">-</span><span class="kw">data</span>.github_repos.contents` <span class="kw">AS</span> c</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a><span class="kw">INNER</span> <span class="kw">JOIN</span> `bigquery<span class="op">-</span><span class="kw">public</span><span class="op">-</span><span class="kw">data</span>.github_repos.files` <span class="kw">AS</span> f</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="kw">ON</span> c.<span class="kw">id</span> <span class="op">=</span> f.<span class="kw">id</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="kw">WHERE</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test00</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  ENDS_WITH(f.path, <span class="ot">&quot;.java&quot;</span>) <span class="kw">AND</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test01</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;SAXParserFactory.newInstance&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;disallow-general-entities&quot;</span>)) <span class="kw">OR</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test02</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;DocumentBuilderFactory.newInstance&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;disallow-doctype-decl&quot;</span>)) <span class="kw">OR</span></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test03</span></span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;XMLInputFactory.newFactory&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;XMLInputFactory.SUPPORT_DTD&quot;</span>)) <span class="kw">OR</span></span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test04</span></span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;TransformerFactory.newInstance&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;XMLConstants.ACCESS_EXTERNAL_DTD&quot;</span>)) <span class="kw">OR</span></span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test05 and Test06</span></span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;SchemaFactory.newInstance&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;XMLConstants.ACCESS_EXTERNAL_DTD&quot;</span>)) <span class="kw">OR</span></span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test07</span></span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;XMLReaderFactory.createXMLReader&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;disallow-doctype-decl&quot;</span>)) <span class="kw">OR</span></span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test08</span></span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;SAXTransformerFactory.newInstance&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;XMLConstants.ACCESS_EXTERNAL_DTD&quot;</span>)) <span class="kw">OR</span></span>
+<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test09</span></span>
+<span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;SAXReader&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;disallow-doctype-decl&quot;</span>)) <span class="kw">OR</span></span>
+<span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a>  <span class="co">-- Test10</span></span>
+<span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a>  (STRSTR(c.content, <span class="ot">&quot;SAXBuilder&quot;</span>) <span class="kw">AND</span> </span>
+<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a>   <span class="kw">NOT</span> STRSTR(c.content, <span class="ot">&quot;disallow-doctype-decl&quot;</span>))</span>
+<span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a>;</span></code></pre></div>
+<p>The query is extremely stupid, but it gets the job done! Essentially, it
+looks through each possible XXE vector and sees if the corresponding
+patch is present. A more intelligent method would be to use BigQuery’s
+capability to run arbitrary Javascript code, as <a href="https://medium.com/google-cloud/static-javascript-code-analysis-within-bigquery-ed0e3011732ca">which has been used to
+run static analysis tools
+before</a>,
+and use that for more complicated detection. I opted for this method
+instead for simplicity and speed.</p>
+<p>Fortunately and unfortunately, I got many results from the query:
+<strong>163424</strong> files contained possible XXEs!</p>
+<p>The detector is obviously imperfect, and leads to a fair amount of false
+positives which must be manually sorted out. I thumbed through some of
+the results manually. In a lot of cases, even if it was vulnerable to an
+XXE, it was rarely an issue in practice. XML is commonly used for
+configuration files, since most configuration files let you do worse
+things. This made classification quite laborous, and it would be a good
+thing to improve before more widescale use.</p>
+</div>
+    </section>
+    <section class="header">
+        
+        Posted on 2018-12-24
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

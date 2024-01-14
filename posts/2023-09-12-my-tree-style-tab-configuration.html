@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>My Tree Style Tab Configuration</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>My Tree Style Tab Configuration</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'meta'." href="../tags/meta.html" rel="tag">meta</a></p>
+        <p>I use <a href="https://addons.mozilla.org/en-US/firefox/addon/tree-style-tab/">Tree Style Tab</a> on Firefox. People comment on how my browser
+looks a lot so here’s how I customize it to look good.</p>
+<figure>
+<img src="../assets/tst_customized.jpg" alt="Customized look" />
+<figcaption aria-hidden="true">Customized look</figcaption>
+</figure>
+<figure>
+<img src="../assets/tst_default.jpg" alt="Default look" />
+<figcaption aria-hidden="true">Default look</figcaption>
+</figure>
+<p>Mostly I’ve just hidden things:</p>
+<ul>
+<li>The title bar takes up vertical space, so I disable it.
+<ul>
+<li>This requires using “Customize toolbar…” in Firefox and then
+unchecking “Title Bar”.</li>
+<li>On xfce, this causes the windows controls to overlap with the
+back/forward/refresh buttons. It doesn’t look good, but whatever.</li>
+</ul></li>
+<li>Hide the regular tab toolbar, which is redundant with Tree Style Tab.</li>
+<li>Remove some noise from the side toolbar. This also makes it hard to
+switch to alternate sidebars, but I don’t do that.</li>
+</ul>
+<p>Here is the userChrome CSS I use. (See
+<a href="https://www.userchrome.org/">userchrome.org</a> for instructions about how
+to add it to your Firefox.)</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode css"><code class="sourceCode css"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="er">// Hide the title bar.</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="pp">#titlebar</span> {</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  <span class="kw">appearance</span>: <span class="dv">none</span> <span class="at">!important</span><span class="op">;</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  <span class="kw">height</span>: <span class="dv">0</span><span class="dt">px</span><span class="op">;</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="pp">#titlebar</span> <span class="op">&gt;</span> <span class="pp">#toolbar-menubar</span> {</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>  <span class="kw">margin-top</span>: <span class="dv">0</span><span class="dt">px</span><span class="op">;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="er">// Hide regular tab toolbar.</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="pp">#main-window</span><span class="ex">[tabsintitlebar</span><span class="op">=</span><span class="st">&quot;true&quot;</span><span class="ex">]</span><span class="in">:not(</span><span class="ex">[extradragspace</span><span class="op">=</span><span class="st">&quot;true&quot;</span><span class="ex">]</span><span class="in">)</span> <span class="pp">#TabsToolbar</span> <span class="op">&gt;</span> <span class="fu">.toolbar-items</span> {</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>  <span class="kw">opacity</span>: <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>  <span class="kw">pointer-events</span>: <span class="dv">none</span><span class="op">;</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="pp">#main-window</span><span class="in">:not(</span><span class="ex">[tabsintitlebar</span><span class="op">=</span><span class="st">&quot;true&quot;</span><span class="ex">]</span><span class="in">)</span> <span class="pp">#TabsToolbar</span> {</span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>    <span class="kw">visibility</span>: <span class="dv">collapse</span> <span class="at">!important</span><span class="op">;</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a><span class="er">// Hide the side toolbar noise.</span></span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a><span class="pp">#TabsToolbar</span> {</span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>  <span class="kw">min-width</span>: <span class="dv">0</span> <span class="at">!important</span><span class="op">;</span></span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>  <span class="kw">min-height</span>: <span class="dv">0</span> <span class="at">!important</span><span class="op">;</span></span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a><span class="pp">#TabsToolbar</span> <span class="op">&gt;</span> <span class="fu">.titlebar-buttonbox-container</span> {</span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>  <span class="kw">display</span>: <span class="dv">block</span><span class="op">;</span></span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>  <span class="kw">position</span>: <span class="dv">absolute</span><span class="op">;</span></span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a>  <span class="kw">top</span>: <span class="dv">12</span><span class="dt">px</span><span class="op">;</span></span>
+<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a>  <span class="kw">left</span>: <span class="dv">0</span><span class="dt">px</span><span class="op">;</span></span>
+<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a><span class="pp">#sidebar-box</span><span class="ex">[sidebarcommand</span><span class="op">=</span><span class="st">&quot;treestyletab_piro_sakura_ne_jp-sidebar-action&quot;</span><span class="ex">]</span> <span class="pp">#sidebar-header</span> {</span>
+<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a>  <span class="kw">display</span>: <span class="dv">none</span><span class="op">;</span></span>
+<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p>I also use <a href="https://addons.mozilla.org/en-GB/firefox/addon/vimium-ff/">Vimium</a>. A neat trick if you use both is that <code>t</code> with
+Vimium will open a new child tab, whereas <code>Ctrl+T</code> will a new root tab.
+This saves me some time reparenting tabs.</p>
+<p>If you want to make your own changes to the CSS, you can use <a href="https://firefox-source-docs.mozilla.org/devtools-user/browser_toolbox/index.html">Firefox’s
+Browser Toolbox</a> in order to write your styling.</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2023-09-12
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

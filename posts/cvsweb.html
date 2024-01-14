@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Reflected XSS in CVSweb 2.x</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Reflected XSS in CVSweb 2.x</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'security'." href="../tags/security.html" rel="tag">security</a></p>
+        <div role="main">
+<h2 id="description">Description</h2>
+<p><a href="https://www.freebsd.org/projects/cvsweb.html">CVSweb 2.x</a> is vulnerable
+to a reflected XSS attack in the <code>cvsroot</code> parameter due to improper
+input sanitization (CWE-79). Example exploit:</p>
+<pre><code>/cgi-bin/cvsweb/?cvsroot=%22%3E%3Cscript%3Ealert(1)%3C/script%3E&amp;only_with_tag=MAIN</code></pre>
+<p>The OpenBSD website has an installation of CVSweb available. <a href="https://cvsweb.openbsd.org/cgi-bin/cvsweb/?cvsroot=%22%3E%3Cscript%3Ealert(1)%3C/script%3E&amp;only_with_tag=MAIN">Proof of
+concept.</a>.</p>
+<h2 id="mitigation">Mitigation</h2>
+<p>The CVSweb project is no longer maintained, according to the <a href="https://www.freebsd.org/projects/cvsweb.html">official
+website</a>:</p>
+<blockquote>
+<p>Please note that CVSweb is no longer maintained, and is no longer in
+use within the FreeBSD Project. There may be unpatched security issues
+with the code available on this page. The information and files
+available here are retained for historical interest only; we can not
+recommend anybody use the code available here without an understanding
+that any security issues discovered will not be fixed.</p>
+</blockquote>
+<p>As such, no attempt was made to contact the maintainer for a fix. The
+issue is fixed by other changes in the 3.x branch of CVSweb. While
+CVSweb 2.x is old, it is still in use today and available as a package
+for many Linux/BSD distributions.</p>
+</div>
+    </section>
+    <section class="header">
+        
+        Posted on 2018-12-23
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

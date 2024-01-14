@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Board of Supervisors: finding related matters with tf-idf</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Board of Supervisors: finding related matters with tf-idf</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'data'." href="../tags/data.html" rel="tag">data</a></p>
+        <p>Last time, <a href="scraping_legistar.html">we scraped San Francisco’s Legistar</a>
+to get all the “matters” (resolutions, hearings, etc.) for San
+Francisco’s Board of Supervisors. Now we’ll use this to do something
+somewhat interesting: adding the ability to query for matters <em>related</em>
+to a certain matter. For example, file #<code>990712</code> reads as follows:</p>
+<blockquote>
+<p>Resolution authorizing the San Francisco Public Library to accept and
+expend $63,647 awarded by the California Library Services Board of the
+California State Library as part of the California library literacy
+service to help fund the adult literacy program conducted by the San
+Francisco Public Library.</p>
+</blockquote>
+<p>Let’s try to find matters similar to this one. We’ll start by using
+<a href="https://en.wikipedia.org/wiki/Tf%E2%80%93idf">tf-idf</a> in order to
+convert our matters’ titles into vectors. First, some imports and data
+loading:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> numpy <span class="im">as</span> np</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> nltk</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> json</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> nltk.stem.snowball <span class="im">import</span> SnowballStemmer</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.feature_extraction.text <span class="im">import</span> TfidfVectorizer</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>rows <span class="op">=</span> []</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> <span class="bu">open</span>(<span class="st">&quot;cleaned.json&quot;</span>) <span class="im">as</span> fp:</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    rows <span class="op">=</span> [json.loads(line) <span class="cf">for</span> line <span class="kw">in</span> fp]</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>titles <span class="op">=</span> [row[<span class="st">&quot;Title&quot;</span>] <span class="cf">for</span> row <span class="kw">in</span> rows]</span></code></pre></div>
+<p>Next, we’ll add a function to stem and tokenize our titles before
+shoving them into <code>TfidfVectorizer</code>:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> tokenizer(text):</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> [</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>        stemmer.stem(token.lower())</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> s <span class="kw">in</span> nltk.sent_tokenize(text)</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> token <span class="kw">in</span> nltk.word_tokenize(s)</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> token.isalpha()</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    ]</span></code></pre></div>
+<p>Now let’s invoke the
+<a href="https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html">TfidfVectorizer</a>:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>tfidf_vectorizer <span class="op">=</span> TfidfVectorizer(</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    max_df<span class="op">=</span><span class="fl">0.8</span>,</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    min_df<span class="op">=</span><span class="fl">0.001</span>,</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    stop_words<span class="op">=</span><span class="st">&quot;english&quot;</span>,</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    use_idf<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    tokenizer<span class="op">=</span>tokenizer,</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    ngram_range<span class="op">=</span>(<span class="dv">1</span>, <span class="dv">3</span>),</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>tfidf_matrix <span class="op">=</span> tfidf_vectorizer.fit_transform(titles)</span></code></pre></div>
+<p>That wasn’t that bad. Now we can query for “most similar” by trying to
+find the vectors with the largest dot product. Note that
+<code>TfidfVectorizer</code> results in vectors with norm 1, so this is equivalent
+to <a href="https://en.wikipedia.org/wiki/Cosine_similarity">cosine similarity</a>.
+For example, to find the 10 documents most similar to document #1234, we
+can run:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>k <span class="op">=</span> <span class="dv">10</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>doc_id <span class="op">=</span> <span class="dv">1234</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>sim <span class="op">=</span> linear_kernel(<span class="op">-</span>tfidf_matrix[doc_id], tfidf_matrix)</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>sim.argpartition(k)[<span class="dv">0</span>][:k]</span></code></pre></div>
+<p>There’s a somewhat subtle and probably useless micro-optimization here:
+we’re using
+<a href="https://numpy.org/doc/stable/reference/generated/numpy.argpartition.html"><code>numpy.argpartition</code></a>
+to avoid sorting the entire array. Since <code>argpartition</code> sorts in
+ascending order, we’ll want the most similar vectors to have the
+smallest values. That’s why we have the negative sign in
+<code>-tfidf_matrix[doc_id]</code>, so that we’re computing the negation of the
+cosine similarity. Another subtle point is that this includes the
+document itself in the “most similar” list since it has cosine
+similarity of 1, that’s easy to fix if desired.</p>
+<p>In the spirit of using <a href="https://datasette.io/">Datasette</a> for things we
+are probably not supposed to use it for, let’s shove this logic into a
+SQLite UDF so that we can query it from there. First, we’ll need to
+construct a map from the row indexes in <code>tfidf_matrix</code> to the
+corresponding <code>FileNumber</code>s in the SQLite database. We’ll also serialize
+this all via <code>pickle</code>, so that we can easily unpickle it later:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pickle</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>filenumbers <span class="op">=</span> [row[<span class="st">&quot;FileNumber&quot;</span>] <span class="cf">for</span> row <span class="kw">in</span> rows]</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> <span class="bu">open</span>(<span class="st">&quot;tfidf.data&quot;</span>, <span class="st">&quot;wb&quot;</span>) <span class="im">as</span> fp:</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    pickle.dump((filenumbers, tfidf_matrix), fp)</span></code></pre></div>
+<p>Now we’ll pivot to creating a custom Datasette plugin:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> datasette <span class="im">import</span> hookimpl</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> sklearn.metrics.pairwise <span class="im">import</span> linear_kernel</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> json</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pickle</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>filenumbers, tfidf_matrix <span class="op">=</span> pickle.load(</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>    <span class="bu">open</span>(<span class="st">&quot;tfidf_data.pickle&quot;</span>, <span class="st">&quot;rb&quot;</span>)</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>filenumbers_to_idx <span class="op">=</span> {</span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>    v: i <span class="cf">for</span> i, v <span class="kw">in</span> <span class="bu">enumerate</span>(filenumber_to_idx)</span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> find_similar(filenumber, k):</span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>    doc_id <span class="op">=</span> filenumber_to_idx.get(filenumber)</span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> doc_id <span class="kw">is</span> <span class="va">None</span>:</span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="st">&quot;[]&quot;</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>    v <span class="op">=</span> <span class="op">-</span>tfidf_matrix[doc_id]</span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>    sims <span class="op">=</span> linear_kernel(v, tfidf_matrix)</span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>    result <span class="op">=</span> [</span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>        filenumbers[d] <span class="cf">for</span> d <span class="kw">in</span> sims.argpartition(k)[<span class="dv">0</span>][:k]</span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>    ]</span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> json.dumps(result)</span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a><span class="at">@hookimpl</span></span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a><span class="kw">def</span> prepare_connection(conn):</span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>    conn.create_function(</span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;find_similar&quot;</span>, <span class="dv">2</span>, find_similar, deterministic<span class="op">=</span><span class="va">True</span></span>
+<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>    )</span></code></pre></div>
+<p>This creates a (deterministic) SQLite function <code>find_similar</code>, which
+takes two arguments: (1) the filenumber to find similar arguments for
+and (2) the number of results requested. In order to return multiple
+results, we’ll serialize our output using <code>json.dumps</code>. We’ll pull out
+the individual values <a href="https://www.sqlite.org/json1.html">via the JSON1
+functions</a>. The
+<a href="https://www.sqlite.org/json1.html#jeach"><code>json_each</code></a> function will
+create a SQLite table from an array. For example, we can find the top 10
+similar matters to a given <code>:filenumber</code>:</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="kw">select</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  legistar.<span class="op">*</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="kw">from</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  json_each(find_similar(<span class="ch">:filenumber</span>, <span class="dv">10</span>)) relevant,</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>  legistar</span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="kw">where</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  legistar.FileNumber <span class="op">=</span> relevant.<span class="fu">value</span></span></code></pre></div>
+<p>We can also add this as a <a href="https://docs.datasette.io/en/latest/sql_queries.html#canned-queries">Datasette canned
+query</a>
+for maximum ease of use, by creating a <code>metadata.json</code> and including it
+in there:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;databases&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;legistar&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;queries&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;find_similiar&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;sql&quot;</span><span class="fu">:</span> <span class="st">&quot;select legistar.* from json_each(find_similar(:filenumber, 10)) relevant, legistar where legistar.FileNumber = relevant.value&quot;</span><span class="fu">,</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;hide_sql&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>          <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Find similar matters&quot;</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>        <span class="fu">}</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<figure>
+<img src="../assets/find-similar-matters.png" alt="A demo of the “Find similar matters” canned query." />
+<figcaption aria-hidden="true">A demo of the “Find similar matters” canned
+query.</figcaption>
+</figure>
+<p>As a closing note, Legistar also has a “Relevant Matters” field too, but
+I suspect it’s manually populated since it’s often incomplete. As a
+cross-referencing &amp; validation step, it’d be nice to compare how often
+tf-idf is also able to identify these “relevant” manners. Of course,
+that requires making ~<span class="math inline">2^{15}</span> HTTP requests to scrape them from
+Legistar, but maybe it’s worth it. A project for another day. :)</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-03-30
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

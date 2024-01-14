@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Personal internet search engine with YaCy</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Personal internet search engine with YaCy</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'selfhosted'." href="../tags/selfhosted.html" rel="tag">selfhosted</a></p>
+        <p>I set up <a href="https://yacy.net">YaCy</a> as a private search engine. Every time I visit a
+webpage, YaCy automatically crawls that webpage along with all of the
+webpages it links to. This gives me a personal search engine which is
+highly centered on my interests.</p>
+<p>For example, here’s a search of “profunctor optics category”. Of the top
+four results, three of them match DuckDuckGo’s, which is not bad:</p>
+<p><img src="../assets/yacy_example_search.png" /></p>
+<p>Here’s a quick description of how I set it all up so that you can follow
+along.</p>
+<h3 id="domain-name">Domain name</h3>
+<label>First, enter the domain name you will use: <input id="domain" style="font-size: 1.4rem" type="text" value="example.com" oninput="updateReplaceMe(this.value)"></label>
+<script type="text/javascript">
+function updateReplaceMe(v) {
+    for (const t of document.getElementsByClassName('replaceme')) {
+        const u = new URL(t.getAttribute('href'));
+        u.hostname = v;
+        t.setAttribute('href', u.toString());
+    }
+    const t = document.getElementById('replacecaddy').firstChild;
+    const firstLineIndex = t.innerText.indexOf('\n')
+    const restOfLines = t.innerText.slice(firstLineIndex);
+    t.innerText = `https://${v}:443 {${restOfLines}`;
+}
+document.addEventListener('DOMContentLoaded', () => {
+    updateReplaceMe(document.getElementById('domain').value);
+});
+</script>
+<p>This will automatically replace the links and configuration in this
+guide with the domain name you choose. <noscript>Unfortunately, you do
+not have Javascript enabled, so you will need to replace all of the
+“example.com”s in this article manually.</noscript></p>
+<p>Make sure to use your DNS provider to set an A record for the IP address
+pointing to the machine which will be hosting your YaCy instance. If you
+are using Wireguard or another VPN (detailed below) you should use a
+private IP address.</p>
+<h3 id="hardware-setup">Hardware Setup</h3>
+<p>I use a DigitalOcean droplet as a VPS. I have a droplet with 50 GB disk,
+2 GB RAM, 1 vCPU and 1 TB bandwidth for $12/month. There are probably
+cheaper hosts out there but I find DigitalOcean really simple so I use
+it. Anyway if you want to use DigitalOcean too, <a href="https://m.do.co/c/d4c8a2083f87">here is my referral
+code</a>.</p>
+<p>I have also set up <a href="https://www.wireguard.com/">Wireguard</a>, which I use as a VPN to secure
+access to everything. That’s not strictly necessary, although it does
+provide some peace of mind. Without Wireguard or a similar VPN, you will
+have to expose YaCy directly to the Internet, which will make security
+updates more important. I’ll note throughout the places where I assume
+Wireguard so you can edit appropriately if you don’t want it.</p>
+<h3 id="caddy">Caddy</h3>
+<p>I use <a href="https://caddyserver.com/">Caddy</a> as my reverse proxy for selfhosting. I like Caddy
+because it’s easy to configure and can be set up to get automatic HTTPS
+certificates with <a href="https://letsencrypt.org/">LetsEncrypt</a>.</p>
+<p>Mostly, Caddy’s HTTPS integration “just works”. Not so simple in my case
+unfortunately. Since everything is only accessible via my Wireguard VPN,
+Caddy cannot use its default method to get HTTPS certificates via the
+<a href="https://letsencrypt.org/docs/challenge-types/#http-01-challenge">HTTP-01</a> “challenge”. Instead I needed to use the
+<a href="https://letsencrypt.org/docs/challenge-types/#dns-01-challenge">DNS-01</a> challenge, which requires building Caddy specifically
+with <a href="https://caddy.community/t/how-to-use-dns-provider-modules-in-caddy-2/8148">support for your DNS provider</a>. I use <a href="https://www.namecheap.com/">Namecheap</a>, which <a href="https://www.namecheap.com/support/api/intro/">has an
+API</a>. You will probably need to adapt the below for whatever DNS
+provider you use (<a href="https://caddy.community/t/how-to-use-dns-provider-modules-in-caddy-2/8148">see here</a>).</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Get a recent version of Go (skip if you already have Go).</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> wget https://go.dev/dl/go1.18.3.linux-amd64.tar.gz</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> tar <span class="at">-C</span> /usr/local/ <span class="at">-xzf</span> go1.13.5.linux-amd64.tar.gz</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> export PATH=<span class="va">$PATH</span>:/usr/local/go/bin</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Install xcaddy, which will be used to build caddy.</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Build Caddy with Namecheap DNS verification.</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> xcaddy build <span class="at">--with</span> github.com/caddy-dns/namecheap</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Build results in an executable called &quot;caddy&quot;</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="co"># in the current directory.</span></span></code></pre></div>
+<p>And here is the configuration I used. Save this in the same directory and
+call it <code>Caddyfile</code>.</p>
+<pre id="replacecaddy"><code>https://example.com:443 {
+  tls {
+    dns namecheap {
+      api_key {env.NAMECHEAP_API_KEY}
+      user {env.NAMECHEAP_USER}
+      client_ip {env.PUBLIC_IP}
+      endpoint https://api.namecheap.com/xml.response
+    }
+  }
+
+  encode gzip
+
+  reverse_proxy yacy:8090
+}</code></pre>
+<h3 id="docker-compose">Docker Compose</h3>
+<p>I am a huge fan of shoving the things I self-host into Docker, mainly
+because it makes the dependency management really easy. Here is the
+<code>docker-compose.yml</code> I wrote for setting up YaCy and Caddy:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">version</span><span class="kw">:</span><span class="at"> </span><span class="st">'3'</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="fu">services</span><span class="kw">:</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">yacy</span><span class="kw">:</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">container_name</span><span class="kw">:</span><span class="at"> yacy</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">image</span><span class="kw">:</span><span class="at"> yacy/yacy_search_server:latest</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">restart</span><span class="kw">:</span><span class="at"> always</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">volumes</span><span class="kw">:</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> yacy_search_server_data:/opt/yacy_search_server/DATA</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">logging</span><span class="kw">:</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">driver</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;json-file&quot;</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">options</span><span class="kw">:</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">max-size</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;50m&quot;</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">max-file</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;2&quot;</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">caddy</span><span class="kw">:</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">image</span><span class="kw">:</span><span class="at"> caddy:2</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">container_name</span><span class="kw">:</span><span class="at"> caddy</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">restart</span><span class="kw">:</span><span class="at"> always</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">ports</span><span class="kw">:</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> 10.0.2.1:80:80</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> 10.0.2.1:443:443</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">volumes</span><span class="kw">:</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./caddy:/usr/bin/caddy</span></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./Caddyfile:/etc/caddy/Caddyfile:ro</span></span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./caddy-config:/config</span></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> ./caddy-data:/data</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">environment</span><span class="kw">:</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">EMAIL</span><span class="kw">:</span><span class="at"> REPLACE_ME</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">NAMECHEAP_USER</span><span class="kw">:</span><span class="at"> REPLACE_ME</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">NAMECHEAP_API_KEY</span><span class="kw">:</span><span class="at"> REPLACE_ME</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">PUBLIC_IP</span><span class="kw">:</span><span class="at"> REPLACE_ME</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">LOG_FILE</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;/data/access.log&quot;</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">logging</span><span class="kw">:</span></span>
+<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">driver</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;json-file&quot;</span></span>
+<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">options</span><span class="kw">:</span></span>
+<span id="cb2-37"><a href="#cb2-37" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">max-size</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;50m&quot;</span></span>
+<span id="cb2-38"><a href="#cb2-38" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">max-file</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;2&quot;</span></span>
+<span id="cb2-39"><a href="#cb2-39" aria-hidden="true" tabindex="-1"></a><span class="fu">volumes</span><span class="kw">:</span></span>
+<span id="cb2-40"><a href="#cb2-40" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">yacy_search_server_data</span><span class="kw">:</span></span></code></pre></div>
+<p>Replace the various <code>REPLACE_ME</code> parts with your information. Everything
+is pretty bog-standard, but three things to note:</p>
+<ol type="1">
+<li>Using <code>container_name: yacy</code> is what let’s us use <code>yacy:8090</code> in the
+<code>Caddyfile</code> from before (to refer to port 8090 on the container <code>yacy</code>).</li>
+<li>We mount in the <code>caddy</code> executable and the <code>Caddyfile</code> from
+above into the caddy container.</li>
+<li>The <code>ports</code> for <code>caddy</code> contain the private IPv4 from
+before: 10.0.2.1. This means that it’s only accessible on that IP.
+If you don’t want Wireguard, <strong>see the next
+section</strong>. You will need to be careful to set up YaCy without
+creating a security hole.</li>
+</ol>
+<p>Anyway, once you save the file as <code>docker-compose.yml</code>, you should be
+able to start it with:</p>
+<pre><code>$ docker-compose -d up</code></pre>
+<p>YaCy in particular takes a minute or so to start up the first time; you
+can watch its progress with <code>docker-compose logs -f yacy</code>. If everything
+goes well, you should also see logs indicating that Caddy was able to
+obtain an HTTPS certificate with <code>docker-compose logs -f caddy</code>.</p>
+<p>If you use Wireguard, feel free to skip <a href="#yacy-essential-configuration">past the next
+section</a>. Otherwise, please read on.</p>
+<h3 id="carefully-set-yacy-password-without-wireguard">Carefully set YaCy password without Wireguard</h3>
+<p>If you don’t use Wireguard, you will need to be careful with the initial
+setup of YaCy. This is because YaCy starts with the username <code>admin</code>
+and the password <code>docker</code>, and anybody can log into it with
+administrator credentials before you do! To make things worse, YaCy
+broadcasts your existence to peers on start up. Frankly this feels like
+a huge security hole and I am not sure why it does not just generate a
+good password for you and print it in the logs.</p>
+<p>Anyway it is easy to work around this with some networking care. (I am
+assuming you are not on a shared system.) First, set <code>ports</code> to only
+bind on localhost:</p>
+<pre><code>    ports:
+      - localhost:80:80
+      - localhost:443:443</code></pre>
+<p>If you are installing YaCy on a remote system, you’ll also want to set
+up a portforward over SSH so that you can access the ports locally:</p>
+<pre><code>$ ssh -L8090:127.0.0.1:80 ...</code></pre>
+<p>Now you can open <a target="_blank" href="http://localhost:8090/ConfigAccounts_p.html">http://localhost:8090/ConfigAccounts_p.html</a> and
+configure the YaCy password. (You may also choose to do the configuration
+steps described in the next section below.)</p>
+<p>Once you have done so and chosen a strong password, remove the
+<code>localhost</code>.</p>
+<pre><code>    ports:
+      - 80:80
+      - 443:443</code></pre>
+<p>And do a <code>docker-compose restart</code>. Now your YaCy instance is exposed,
+but it has a password.</p>
+<h3 id="yacy-essential-configuration">YaCy essential configuration</h3>
+<p>At this point, you should be able to open YaCy. <a target="_blank" class="replaceme" href="https://example.com">Try this link.</a></p>
+<p>YaCy’s default settings are designed for peer-to-peer search engine
+usage, not for a private search engine like we want. Fortunately it’s
+possible to configure YaCy to behave correctly. It’s entirely using the
+GUI, so here’s what you need.</p>
+<ol type="1">
+<li>Open <a target="_blank" class="replaceme" href="https://example.com/ConfigAccounts_p.html">ConfigAccounts_p.html</a> and set an administrator
+password. The default login is username <code>admin</code> with password
+<code>docker</code>.</li>
+<li>Open <a target="_blank" class="replaceme" href="https://example.com/ConfigAccounts_p.html">ConfigAccounts_p.html</a> and flip “Protection of all
+pages” to “on”. Then click “Set Access Rules”.</li>
+<li>Open <a target="_blank" class="replaceme" href="https://example.com/ConfigBasic.html">ConfigBasic.html</a>. Under “Use Case”, select
+“Search portal for your own web pages”. Then click “Set
+configuration” at the bottom.</li>
+<li>Open <a target="_blank" class="replaceme" href="https://example.com/ConfigNetwork_p.html">ConfigNetwork_p.html</a>. Select “Robinson Mode” and
+then “Private Peer”. Then click “Save”. This stops you from all peer-to-peer traffic.</li>
+</ol>
+<h3 id="add-yacy-search-to-your-browser">Add YaCy search to your browser</h3>
+<p>YaCy supports the OpenSearch standard. Your browser should document how
+to add a custom search engine (for your convenience: <a href="https://support.mozilla.org/en-US/kb/add-or-remove-search-engine-firefox" target="_blank">Firefox</a> and <a href="https://support.google.com/chrome/answer/95426?hl=en&co=GENIE.Platform%3DDesktop#edit" target="_blank">Chrome</a>). In short:</p>
+<ol type="1">
+<li><p><em>Firefox</em>: visit <a target="_blank" class="replaceme" href="https://example.com">your search homepage</a>, right-click the address bar, and click “Add ‘YaCy’”.</p></li>
+<li><p><em>Chrome</em>: Go to Settings &gt; Search Engines
+and click “Add”. You will need the “%s URL” of the search engine.
+Here it is: <a target="_blank" class="replaceme" href="https://example.com/yacysearch.html?query=%s&Enter=&auth=&verify=ifexist&contentdom=text&nav=location%2Chosts%2Cauthors%2Cnamespace%2Ctopics%2Cfiletype%2Cprotocol%2Clanguage&startRecord=0&indexof=off&meanCount=5&resource=global&prefermaskfilter=&maximumRecords=10&timezoneOffset=420">%s
+URL</a>.</p></li>
+</ol>
+<h3 id="automatically-crawl-sites-you-visit">Automatically crawl sites you visit</h3>
+<p>I use Userscripts to make an API request to YaCy’s <a href="https://wiki.yacy.net/index.php/Dev:APICrawler">Crawler
+API</a> to make YaCy index
+the page I am currently on along with all of its linked pages. I use
+<a href="https://violentmonkey.github.io/">Violentmonkey</a> on desktop, and I use
+<a href="https://apps.apple.com/us/app/userscripts/id1463298887">Userscripts</a> on
+iOS.</p>
+If you have a userscript runner installed, you
+should be able to install the script by clicking this button:
+<style>
+#userjs {
+	border: 1px solid #888;
+	padding: 2px 16px;
+	text-decoration: none;
+	font-weight: bold;
+	font-size: 1.5em;
+	display: block;
+	text-align: center;
+	background: #bae37f;
+	border-radius: 5px;
+}
+</style>
+<p><a target="_blank" href="../assets/autoyacy.user.js" id="userjs">Install the script</a></p>
+<p>After installing the script, replace <code>YACY_HOST</code> with your YaCy base URL
+and <code>ADMIN_PASSWORD</code> with your admin password.</p>
+<p>To check if this works, browse a couple of sites and open the developer
+console. You should see “YaCy gave us a response 200” appear in the
+console. If you go to YaCy’s crawler monitor page at
+<a target="_blank" class="replaceme" href="https://example.com/Crawler_p.html">Crawler_p.html</a>, you’ll see sites begin to fly by as YaCy
+performs crawls.</p>
+<h3 id="conclusion">Conclusion</h3>
+<p>At this point everything should work end-to-end. The first day or so of
+browsing, your private search engine probably won’t be so useful beyond
+history search. But over time it will accumulate more and more
+documents, and become more useful. Make sure to monitor the disk space
+so that you can keep indexing new things.</p>
+<p>One of the great things about YaCy is that you have total control over
+the search engine and all its knobs. You can do things like <a target="_blank" class="replaceme" href="https://example.com/Blacklist_p.html">blacklist sites you don’t
+like</a> or <a target="_blank" class="replaceme" href="https://example.com/RankingSolr_p.html">change the ranking
+algorithm</a>. Congrats on your search engine!</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-07-03
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

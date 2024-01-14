@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Optimizing mprotect in LuaJIT with pkeys (Memory Protection Keys)</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Optimizing mprotect in LuaJIT with pkeys (Memory Protection Keys)</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p><a href="https://luajit.org/">LuaJIT</a> is a just-in-time compiler for the Lua programming language.
+Just-in-time compilers generate machine code at runtime. This can make
+just-in-time compilers a target for attackers – if an attacker can
+overwrite the machine code with their own can cause arbitrary code
+execution. This sort of overwriting can occur either due to a flaw in
+the JIT compiler itself or due to memory safety errors in other code.</p>
+<p>For this reason, modern JITs adhere to a <a href="https://en.wikipedia.org/wiki/Executable_space_protection">W^X policy</a>: a page is
+allowed to be either writable (W) or executable (X) but not both. First,
+the page is marked writable but not executable, and the JIT writes the
+machine code. Then, the page is marked non-writable and executable, to
+prevent the code from being written again. This can prevent exploitation
+for certain classes of errors, although it is not flawless.</p>
+<p>Unfortunately this sort of protection can be quite slow, especially in
+cases where the JIT is very active. Changing the page permissions on
+Linux is done via <a href="https://manpage.me/?q=mprotect"><code>mprotect(2)</code></a>. This in turn requires
+invalidating an entry in the <a href="https://en.wikipedia.org/wiki/Translation_lookaside_buffer">Translation Lookaside Buffer (TLB)</a>, which
+can be quite slow.</p>
+<p>Here is a flamegraph for the <code>fasta</code> benchmark of the <a href="https://github.com/softdevteam/lua_benchmarking"><code>lua_benchmarking</code></a>
+suite. As you can see we spend around 15% of our time in just <code>mprotect</code>!</p>
+<p><img src="../assets/flamegraph-fasta.png" /></p>
+<p>We’ll see that we can mostly remove this overhead, in addition to
+gaining some security benefit. A couple of benchmarks will improve by
+10%, but our average improvement ends up being a modest but
+respectable 1.1% (geometric mean). The techniques here can easily be
+adapted to other JITs.</p>
+<h2 id="what-are-pkeys-memory-protection-keys">What are pkeys (Memory Protection Keys)?</h2>
+<p>pkeys (also known as Intel Memory Protection Keys) are an extension to
+the existing permission system. pkeys let us change permissions without
+requiring modification of the page tables.</p>
+<p>The basic idea is simple:</p>
+<ul>
+<li>Users can attach a pkey to a page. Access to the page is only
+permitted if the thread sets the correct pkey. Users can also
+selectively enable certain pkey permissions (e.g., allow read but not
+write).</li>
+<li>On the hardware level, pkeys only <em>restrict</em> permissions from the
+underlying page. Confusingly at the software API level,
+<code>pkey_mprotect(2)</code> can <em>both</em> change the permissions of the
+underlying page and attach a pkey to the page, so it may appear to
+be adding permissions even though it is not.</li>
+</ul>
+<p>Here is a little example showing how to use <code>pkeys</code> on Linux:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="pp">#define </span><span class="ot">_GNU_SOURCE</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="pp">#include </span><span class="im">&lt;stdio.h&gt;</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="pp">#include </span><span class="im">&lt;stdlib.h&gt;</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="pp">#include </span><span class="im">&lt;sys/mman.h&gt;</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="pp">#define SZ </span><span class="dv">4096</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="dt">int</span> main<span class="op">(</span><span class="dt">int</span> argc<span class="op">,</span> <span class="dt">char</span> <span class="op">*</span>argv<span class="op">[])</span> <span class="op">{</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Create a page with no permissions.</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> <span class="op">*</span>p <span class="op">=</span> mmap<span class="op">(</span>NULL<span class="op">,</span> SZ<span class="op">,</span> PROT_NONE<span class="op">,</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>                  MAP_PRIVATE <span class="op">|</span> MAP_ANONYMOUS<span class="op">,</span> <span class="op">-</span><span class="dv">1</span><span class="op">,</span> <span class="dv">0</span><span class="op">);</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>p <span class="op">==</span> MAP_FAILED<span class="op">)</span> <span class="op">{</span> perror<span class="op">(</span><span class="st">&quot;mmap&quot;</span><span class="op">);</span> exit<span class="op">(</span><span class="dv">1</span><span class="op">);</span> <span class="op">}</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Allocate a pkey.</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">int</span> pkey <span class="op">=</span> pkey_alloc<span class="op">(</span><span class="dv">0</span><span class="op">,</span> PKEY_DISABLE_ACCESS<span class="op">);</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>pkey <span class="op">&lt;</span> <span class="dv">0</span><span class="op">)</span> <span class="op">{</span> perror<span class="op">(</span><span class="st">&quot;pkey_alloc&quot;</span><span class="op">);</span> exit<span class="op">(</span><span class="dv">1</span><span class="op">);</span> <span class="op">}</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Set the pkey for the page and change the page to RW.</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Setting the permissions here (rather than above in</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>    <span class="co">// mmap), removes a race condition.</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>pkey_mprotect<span class="op">(</span>p<span class="op">,</span> SZ<span class="op">,</span> PROT_READ<span class="op">|</span>PROT_WRITE<span class="op">,</span> pkey<span class="op">)</span> <span class="op">&lt;</span> <span class="dv">0</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>        perror<span class="op">(</span><span class="st">&quot;pkey_mprotect&quot;</span><span class="op">);</span> exit<span class="op">(</span><span class="dv">1</span><span class="op">);</span> <span class="op">}</span></span>
+<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-22"><a href="#cb1-22" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Trying to read or write now will segfault, since we</span></span>
+<span id="cb1-23"><a href="#cb1-23" aria-hidden="true" tabindex="-1"></a>    <span class="co">// have not actually started using the pkey.</span></span>
+<span id="cb1-24"><a href="#cb1-24" aria-hidden="true" tabindex="-1"></a>    <span class="co">// printf(&quot;(would crash) p = %p, *p = %x\n&quot;, p, *p);</span></span>
+<span id="cb1-25"><a href="#cb1-25" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-26"><a href="#cb1-26" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Have this thread start using the pkey. &quot;0&quot; indicates</span></span>
+<span id="cb1-27"><a href="#cb1-27" aria-hidden="true" tabindex="-1"></a>    <span class="co">// that we want to allow all actions that are allowed</span></span>
+<span id="cb1-28"><a href="#cb1-28" aria-hidden="true" tabindex="-1"></a>    <span class="co">// by the underlying mapping (set by pkey_mprotect).</span></span>
+<span id="cb1-29"><a href="#cb1-29" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>pkey_set<span class="op">(</span>pkey<span class="op">,</span> <span class="dv">0</span><span class="op">)</span> <span class="op">&lt;</span> <span class="dv">0</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb1-30"><a href="#cb1-30" aria-hidden="true" tabindex="-1"></a>        perror<span class="op">(</span><span class="st">&quot;pkey_set&quot;</span><span class="op">);</span> exit<span class="op">(</span><span class="dv">1</span><span class="op">);</span> <span class="op">}</span></span>
+<span id="cb1-31"><a href="#cb1-31" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-32"><a href="#cb1-32" aria-hidden="true" tabindex="-1"></a>    <span class="co">// We can now read/write the mapping!</span></span>
+<span id="cb1-33"><a href="#cb1-33" aria-hidden="true" tabindex="-1"></a>    <span class="op">*</span>p <span class="op">=</span> <span class="bn">0xdeadbeef</span><span class="op">;</span></span>
+<span id="cb1-34"><a href="#cb1-34" aria-hidden="true" tabindex="-1"></a>    printf<span class="op">(</span><span class="st">&quot;p = </span><span class="sc">%p</span><span class="st">, *p = </span><span class="sc">%x\n</span><span class="st">&quot;</span><span class="op">,</span> p<span class="op">,</span> <span class="op">*</span>p<span class="op">);</span></span>
+<span id="cb1-35"><a href="#cb1-35" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Unlike mprotect(2), other threads cannot.</span></span>
+<span id="cb1-36"><a href="#cb1-36" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-37"><a href="#cb1-37" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Disable read and write access to the page.</span></span>
+<span id="cb1-38"><a href="#cb1-38" aria-hidden="true" tabindex="-1"></a>    <span class="co">// We could disable only writes via PKEY_DISABLE_WRITE.</span></span>
+<span id="cb1-39"><a href="#cb1-39" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>pkey_set<span class="op">(</span>pkey<span class="op">,</span> PKEY_DISABLE_ACCESS<span class="op">)</span> <span class="op">&lt;</span> <span class="dv">0</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb1-40"><a href="#cb1-40" aria-hidden="true" tabindex="-1"></a>        perror<span class="op">(</span><span class="st">&quot;pkey_set&quot;</span><span class="op">);</span> exit<span class="op">(</span><span class="dv">1</span><span class="op">);</span> <span class="op">}</span></span>
+<span id="cb1-41"><a href="#cb1-41" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-42"><a href="#cb1-42" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Trying to read or write now will segfault.</span></span>
+<span id="cb1-43"><a href="#cb1-43" aria-hidden="true" tabindex="-1"></a>    printf<span class="op">(</span><span class="st">&quot;(Segmentation fault) p = </span><span class="sc">%p</span><span class="st">, *p = </span><span class="sc">%x\n</span><span class="st">&quot;</span><span class="op">,</span> p<span class="op">,</span> <span class="op">*</span>p<span class="op">);</span></span>
+<span id="cb1-44"><a href="#cb1-44" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<h2 id="the-patch">The patch</h2>
+<p>This patch is pretty simple. First, we introduce a new place to store
+the <code>pkey</code> and set it to an uninitiailized state.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode diff"><code class="sourceCode diff"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">diff --git a/src/lj_jit.h b/src/lj_jit.h</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>index 32b3861a..073768ab 100644</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="dt">--- a/src/lj_jit.h</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="dt">+++ b/src/lj_jit.h</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -516,6 +516,12 @@ typedef struct jit_State {</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>   BCLine prev_line;	/* Previous line. */</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>   int prof_mode;	/* Profiling mode: 0, 'f', 'l'. */</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a> #endif</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="va">+</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="va">+#if LUAJIT_SECURITY_MCODE</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="va">+#ifdef LUAJIT_SECURITY_MCODE_PKEY</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="va">+  int pkey;</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="va">+#endif</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="va">+#endif</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a> } jit_State;</span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a> </span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a> #ifdef LUA_USE_ASSERT</span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a><span class="kw">diff --git a/src/lj_dispatch.c b/src/lj_dispatch.c</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>index ded382aa..cca3e88c 100644</span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a><span class="dt">--- a/src/lj_dispatch.c</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="dt">+++ b/src/lj_dispatch.c</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -85,7 +85,13 @@ void lj_dispatch_init(GG_State *GG)</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a> /* Initialize hotcount table. */</span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a> void lj_dispatch_init_hotcount(global_State *g)</span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a> {</span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a><span class="st">-  int32_t hotloop = G2J(g)-&gt;param[JIT_P_hotloop];</span></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a><span class="va">+  jit_State *J = G2J(g);</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a><span class="va">+  int32_t hotloop = J-&gt;param[JIT_P_hotloop];</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a><span class="va">+#if LUAJIT_SECURITY_MCODE</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a><span class="va">+#ifdef LUAJIT_SECURITY_MCODE_PKEY</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a><span class="va">+  J-&gt;pkey = -1;</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a><span class="va">+#endif</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a><span class="va">+#endif</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a>   HotCount start = (HotCount)(hotloop*HOTCOUNT_LOOP - 1);</span>
+<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a>   HotCount *hotcount = G2GG(g)-&gt;hotcount;</span>
+<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a>   uint32_t i;</span></code></pre></div>
+<p>Next, we enable the pkey when requested. LuaJIT uses <code>MCPROT_GEN</code> to
+request readable+writable pages. That corresponds to allowing our
+pkey to have complete access. When the code generation is done,
+LuaJIT uses <code>MCPROT_RUN</code> to change the permissions to
+readable+executable. That corresponds to removing write permissions
+from our pkey via <code>PKEY_DISABLE_WRITE</code>.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode diff"><code class="sourceCode diff"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="kw">diff --git a/src/lj_mcode.c b/src/lj_mcode.c</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>index 163aada4..323081c5 100644</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="dt">--- a/src/lj_mcode.c</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="dt">+++ b/src/lj_mcode.c</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -6,6 +6,9 @@</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a> #define lj_mcode_c</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a> #define LUA_CORE</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a> </span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="va">+#define _GNU_SOURCE</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a><span class="va">+#include &lt;sys/mman.h&gt;</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a><span class="va">+</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a> #include &quot;lj_obj.h&quot;</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a> #if LJ_HASJIT</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a> #include &quot;lj_gc.h&quot;</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -88,8 +91,6 @@ static int mcode_setprot(void *p, size_t sz, DWORD prot)</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a> </span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a> #elif LJ_TARGET_POSIX</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a> </span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a><span class="st">-#include &lt;sys/mman.h&gt;</span></span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a><span class="st">-</span></span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a> #ifndef MAP_ANONYMOUS</span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a> #define MAP_ANONYMOUS	MAP_ANON</span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a> #endif</span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -105,7 +106,11 @@ static int mcode_setprot(void *p, size_t sz, DWORD prot)</span></span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a> </span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a> static void *mcode_alloc_at(jit_State *J, uintptr_t hint, size_t sz, int prot)</span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a> {</span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a><span class="va">+#ifdef LUAJIT_SECURITY_MCODE_PKEY</span></span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a><span class="va">+  void *p = mmap((void *)hint, sz, PROT_EXEC|prot|MCPROT_CREATE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);</span></span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a><span class="va">+#else</span></span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>   void *p = mmap((void *)hint, sz, prot|MCPROT_CREATE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);</span>
+<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a><span class="va">+#endif</span></span>
+<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>   if (p == MAP_FAILED) {</span>
+<span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a>     if (!hint) lj_trace_err(J, LJ_TRERR_MCODEAL);</span>
+<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>     p = NULL;</span>
+<span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a><span class="dt">@@ -183,8 +188,32 @@ static LJ_NORET LJ_NOINLINE void mcode_protfail(jit_State *J)</span></span>
+<span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a> static void mcode_protect(jit_State *J, int prot)</span>
+<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a> {</span>
+<span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a>   if (J-&gt;mcprot != prot) {</span>
+<span id="cb3-40"><a href="#cb3-40" aria-hidden="true" tabindex="-1"></a><span class="va">+#ifdef LUAJIT_SECURITY_MCODE_PKEY</span></span>
+<span id="cb3-41"><a href="#cb3-41" aria-hidden="true" tabindex="-1"></a><span class="va">+    if (J-&gt;pkey == -1) {</span></span>
+<span id="cb3-42"><a href="#cb3-42" aria-hidden="true" tabindex="-1"></a><span class="va">+      int pkey = pkey_alloc(0, PKEY_DISABLE_WRITE);</span></span>
+<span id="cb3-43"><a href="#cb3-43" aria-hidden="true" tabindex="-1"></a><span class="va">+      if (LJ_UNLIKELY(pkey &lt; 0)) {</span></span>
+<span id="cb3-44"><a href="#cb3-44" aria-hidden="true" tabindex="-1"></a><span class="va">+        mcode_protfail(J);</span></span>
+<span id="cb3-45"><a href="#cb3-45" aria-hidden="true" tabindex="-1"></a><span class="va">+      }</span></span>
+<span id="cb3-46"><a href="#cb3-46" aria-hidden="true" tabindex="-1"></a><span class="va">+      J-&gt;pkey = pkey;</span></span>
+<span id="cb3-47"><a href="#cb3-47" aria-hidden="true" tabindex="-1"></a><span class="va">+    }</span></span>
+<span id="cb3-48"><a href="#cb3-48" aria-hidden="true" tabindex="-1"></a><span class="va">+    if (prot == MCPROT_GEN) {</span></span>
+<span id="cb3-49"><a href="#cb3-49" aria-hidden="true" tabindex="-1"></a><span class="va">+      if (LJ_UNLIKELY(pkey_mprotect(J-&gt;mcarea, J-&gt;szmcarea, prot|PROT_EXEC, J-&gt;pkey) &lt; 0)) {</span></span>
+<span id="cb3-50"><a href="#cb3-50" aria-hidden="true" tabindex="-1"></a><span class="va">+        mcode_protfail(J);</span></span>
+<span id="cb3-51"><a href="#cb3-51" aria-hidden="true" tabindex="-1"></a><span class="va">+      }</span></span>
+<span id="cb3-52"><a href="#cb3-52" aria-hidden="true" tabindex="-1"></a><span class="va">+      if (LJ_UNLIKELY(pkey_set(J-&gt;pkey, 0) &lt; 0)) {</span></span>
+<span id="cb3-53"><a href="#cb3-53" aria-hidden="true" tabindex="-1"></a><span class="va">+        mcode_protfail(J);</span></span>
+<span id="cb3-54"><a href="#cb3-54" aria-hidden="true" tabindex="-1"></a><span class="va">+      }</span></span>
+<span id="cb3-55"><a href="#cb3-55" aria-hidden="true" tabindex="-1"></a><span class="va">+    } else if (prot == MCPROT_RUN) {</span></span>
+<span id="cb3-56"><a href="#cb3-56" aria-hidden="true" tabindex="-1"></a><span class="va">+      if (LJ_UNLIKELY(pkey_set(J-&gt;pkey, PKEY_DISABLE_WRITE) &lt; 0)) {</span></span>
+<span id="cb3-57"><a href="#cb3-57" aria-hidden="true" tabindex="-1"></a><span class="va">+        mcode_protfail(J);</span></span>
+<span id="cb3-58"><a href="#cb3-58" aria-hidden="true" tabindex="-1"></a><span class="va">+      }</span></span>
+<span id="cb3-59"><a href="#cb3-59" aria-hidden="true" tabindex="-1"></a><span class="va">+    } else {</span></span>
+<span id="cb3-60"><a href="#cb3-60" aria-hidden="true" tabindex="-1"></a><span class="va">+      mcode_protfail(J);</span></span>
+<span id="cb3-61"><a href="#cb3-61" aria-hidden="true" tabindex="-1"></a><span class="va">+    }</span></span>
+<span id="cb3-62"><a href="#cb3-62" aria-hidden="true" tabindex="-1"></a><span class="va">+#else</span></span>
+<span id="cb3-63"><a href="#cb3-63" aria-hidden="true" tabindex="-1"></a>     if (LJ_UNLIKELY(mcode_setprot(J-&gt;mcarea, J-&gt;szmcarea, prot)))</span>
+<span id="cb3-64"><a href="#cb3-64" aria-hidden="true" tabindex="-1"></a>       mcode_protfail(J);</span>
+<span id="cb3-65"><a href="#cb3-65" aria-hidden="true" tabindex="-1"></a><span class="va">+#endif</span></span>
+<span id="cb3-66"><a href="#cb3-66" aria-hidden="true" tabindex="-1"></a>     J-&gt;mcprot = prot;</span>
+<span id="cb3-67"><a href="#cb3-67" aria-hidden="true" tabindex="-1"></a>   }</span>
+<span id="cb3-68"><a href="#cb3-68" aria-hidden="true" tabindex="-1"></a> }</span></code></pre></div>
+<h2 id="improvements">Improvements</h2>
+<p>I used <a href="https://github.com/softdevteam/lua_benchmarking">this LuaJIT benchmarking suite</a>. Here are all the
+benchmarks which changed by more than 1% and were statistically
+significant according to a t-test (p &lt; <a href="https://en.wikipedia.org/wiki/Bonferroni_correction">0.05/46</a>). Each benchmark
+is 30 executions of an inner loop, and I ran each benchmark 48 times.</p>
+<pre><code>Benchmark        Improvement%
+---------        ------------
+fasta                  17.05%
+luacheck                9.67%
+luacheck_parser         8.65%
+table_cmpsort           5.38%
+quicksort               2.61%
+meteor                  2.53%
+coroutine_ring          2.17%
+life                    2.08%
+recursive_ack           1.46%
+euler14                 1.36%
+.........              ......
+ray                    -1.14%
+heapsort               -1.16%
+richards               -1.29%
+deltablue              -1.87%
+nsieve                 -2.26%
+mandelbrot_bit         -3.83%</code></pre>
+<p>Using the profiler indeed verifies that all the time spent in
+<code>mprotect</code> is gone! I am not really sure why some of the benchmarks
+get slower; a lot of them are noisy so it is possible they are just
+false positives.</p>
+<p>I am sure this optimization can be applied to get some modest wins in
+other JIT engines. It is particularly easy for LuaJIT, which is
+entirely single threaded, but it could be done for other more
+complicated JITs as well. One hitch is that the pkeys are
+thread-local, so you need to coordinate them between the different
+threads.</p>
+<hr />
+<p><strong>Postscript:</strong> After doing this and writing it all up, I discovered
+<a href="https://arxiv.org/pdf/1811.07276v1.pdf">this paper</a> which does the same thing for Javascript
+engines, and also contains a lot more information for the curious!</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-10-13
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

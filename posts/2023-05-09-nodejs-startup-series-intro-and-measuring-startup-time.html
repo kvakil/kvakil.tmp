@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Node.js Startup: Series Introduction &amp; Measuring Startup</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Node.js Startup: Series Introduction &amp; Measuring Startup</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'nodejs-startup'." href="../tags/nodejs-startup.html" rel="tag">nodejs-startup</a>, <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p>This blog post is part of <a href="../tags/nodejs-startup.html">a series</a> to see
+how much I can optimize Node.js’s startup time. Startup time is
+<a href="https://github.com/nodejs/node/issues/45662">something that users care about</a>, especially for interactive
+tooling or for workloads with many short-lived processes. The most
+important step of performance analysis is measurement, so let’s start by
+measuring Node.js’s startup time.</p>
+<p>I decided to measure the time to execute <code>node -e 0</code>, which simply evaluates
+the no-op expression of “0”. I focused on “warm startup”, i.e. when the
+various file system caches were already warm. This felt more realistic since
+mostly when you care about startup time, it’s for something you’ll be executing
+often, so the operating system will already have the executable and shared
+libraries paged in to memory.</p>
+<p>Here’s a boxplot of the runtimes of older versions of Node.js, along with the
+main branch (“main”, 4b80a7b0c404e). As a teaser for the rest of this series,
+I’ve also included my WIP branch (“mine”).</p>
+<script type="text/javascript" src="../assets/vega@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-lite@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-embed@6.js" defer></script>
+<script type="text/javascript" src="../assets/nodejs-startup-intro-vl.js" defer></script>
+<center>
+<div id="vis-runtime" style="width: 650px;max-width:100%" data-filename="/assets/node-startup-runtime-data.json" data-title="Startup time of Node.js over the years">
+
+</div>
+<noscript>
+Sorry, you need Javascript to view this plot. Do you read this blog
+without Javascript? Please email me at <code>ken@kvakil.me</code>.
+</noscript>
+</center>
+<p>As you can see, I’ve got a branch where the startup is faster than it’s
+been in a long time (at least since 2017). It’s partially offset by a
+minor regression in <code>main</code>. There’s not much variance in runtimes, so
+the boxplot looks smushed.</p>
+<p>Typical process startup is memory intensive, so optimizing startup time will
+likely optimize memory usage as well, and vice-versa. Here’s the same graph
+except focusing on memory usage.</p>
+<center>
+<div id="vis-memory" style="width: 650px;max-width:100%" data-filename="/assets/node-startup-memory-data.json" data-title="Unique set size of Node.js over the years">
+
+</div>
+<noscript>
+Sorry, you need Javascript to view this plot. Do you read this blog
+without Javascript? Please email me at <code>ken@kvakil.me</code>.
+</noscript>
+</center>
+<p>It’s not as impressive as the runtime graph unfortunately: again it’s
+fighting a regression in <code>main</code>. The final results bring us back to
+v17.9.1 (released June 2022), but still 2.3 MiB above the glory days of
+15.4.0 (released April 2021).</p>
+<p>Node.js also provides its own startup benchmarks, which we can check to verify
+our results.</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> node benchmark/compare.js <span class="at">--old</span> ./node_main <span class="at">--new</span> ./node <span class="dt">\</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">--runs</span> 10 <span class="at">--filter</span> startup misc <span class="op">&gt;</span> results.csv</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> node-benchmark-compare results.csv</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>                           <span class="ex">confidence</span> improvement</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="ex">process</span> require-builtins   <span class="pp">***</span>        35.96 %</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="ex">process</span> semicolon          <span class="pp">***</span>        37.63 %</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="ex">worker</span>  require-builtins   <span class="pp">***</span>        34.96 %</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="ex">worker</span>  semicolon          <span class="pp">***</span>        34.80 %</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>  <span class="ex">0.00</span> false positives, when considering a 0.1% risk acceptance <span class="er">(</span><span class="ex">***</span><span class="kw">)</span></span></code></pre></div>
+<p>In addition to speeding up the no-op benchmark (semicolon), we’ll also
+be speeding up the overall performance of requiring Node.js’s builtin
+library (require-builtins).</p>
+<p><em>Check out <a href="../tags/nodejs-startup.html">the rest of this series</a> to see
+how we’ll achieve this amazing feat!</em></p>
+<hr />
+<h3 id="extra-how-i-made-the-graphs">Extra: How I made the graphs</h3>
+<p>All steps were performed on an Amazon EC2 Linux instance running Debian
+10. First, I downloaded a bunch of old versions of Node.js using
+<a href="https://github.com/ekalinin/nodeenv"><code>nodeenv</code></a>.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> n <span class="kw">in</span> 9.11.2 11.15.0 13.14.0 15.14.0 17.9.1 19.9.0<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="ex">nodeenv</span> <span class="va">$n</span> <span class="at">-n</span> <span class="va">$n</span> <span class="kw">&amp;</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="bu">wait</span></span></code></pre></div>
+<p>I also built the “main” branch on the day where I started this project
+(SHA 4b80a7b0c404e) as a comparison point. I did so by creating a
+release tarball via <code>CUSTOMTAG=t DISTTYPE=custom make -j$(nproc) binary</code>, and extracting it to <code>main/</code>.</p>
+<p>I used <a href="https://github.com/sharkdp/hyperfine"><code>hyperfine</code></a> to benchmark the runtime. Executing warmup
+iterations via <code>--warmup</code> was important to avoid outliers, since
+Node.js’s startup is very IO heavy.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">hyperfine</span> <span class="at">--export-json</span> timings.json <span class="dt">\</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="at">-L</span> node_version 9.11.2,11.15.0,13.14.0,15.14.0,17.9.1,19.9.0,main,mine <span class="dt">\</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">--shell</span><span class="op">=</span>none <span class="at">--warmup</span> 100 <span class="st">'./{node_version}/bin/node -e 0'</span></span></code></pre></div>
+<p>This exports a <code>timings.json</code> file. Although <code>hyperfine</code> comes with some
+utilities for graphing it, I prefer <a href="https://vega.github.io/vega-lite/">Vega-Lite</a>. Vega-Lite’s builtin
+transform functionality is sufficient to convert hyperfine’s format into one
+that Vega-Lite can use for graphing:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;$schema&quot;</span><span class="fu">:</span> <span class="st">&quot;https://vega.github.io/schema/vega-lite/v5.json&quot;</span><span class="fu">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;data&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;url&quot;</span><span class="fu">:</span> <span class="st">&quot;/assets/node-startup-runtime-data.json&quot;</span><span class="fu">,</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;format&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;json&quot;</span><span class="fu">,</span> <span class="dt">&quot;property&quot;</span><span class="fu">:</span> <span class="st">&quot;results&quot;</span><span class="fu">}</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;transform&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;flatten&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;times&quot;</span><span class="ot">]</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;calculate&quot;</span><span class="fu">:</span> <span class="st">&quot;1000*datum.times&quot;</span><span class="fu">,</span> <span class="dt">&quot;as&quot;</span><span class="fu">:</span> <span class="st">&quot;times&quot;</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mark&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;boxplot&quot;</span><span class="fu">,</span> <span class="dt">&quot;extent&quot;</span><span class="fu">:</span> <span class="st">&quot;min-max&quot;</span><span class="fu">},</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;encoding&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;x&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;parameters.node_version&quot;</span><span class="fu">,</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Node.js version&quot;</span><span class="fu">,</span></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;nominal&quot;</span><span class="fu">,</span></span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;sort&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;axis&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;labelAngle&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">}</span></span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;y&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;times&quot;</span><span class="fu">,</span></span>
+<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;quantitative&quot;</span><span class="fu">,</span></span>
+<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Time (ms)&quot;</span></span>
+<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span>
+<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;color&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Node.js version&quot;</span><span class="fu">,</span></span>
+<span id="cb4-27"><a href="#cb4-27" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;parameters.node_version&quot;</span><span class="fu">,</span></span>
+<span id="cb4-28"><a href="#cb4-28" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;nominal&quot;</span><span class="fu">,</span></span>
+<span id="cb4-29"><a href="#cb4-29" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;sort&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="cb4-30"><a href="#cb4-30" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb4-31"><a href="#cb4-31" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb4-32"><a href="#cb4-32" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;config&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;numberFormat&quot;</span><span class="fu">:</span> <span class="st">&quot;.3&quot;</span><span class="fu">},</span></span>
+<span id="cb4-33"><a href="#cb4-33" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;Startup time of Node.js over the years&quot;</span><span class="fu">},</span></span>
+<span id="cb4-34"><a href="#cb4-34" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;width&quot;</span><span class="fu">:</span> <span class="st">&quot;container&quot;</span><span class="fu">,</span> <span class="dt">&quot;height&quot;</span><span class="fu">:</span> <span class="dv">500</span></span>
+<span id="cb4-35"><a href="#cb4-35" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>To measure memory usage, I decided to look at “unique set size” (USS). Unique
+set size is a measure of how much memory an individual process adds, i.e.
+excluding any memory shared by any other process. Resident set size (RSS) is
+also interesting, but it includes <em>all</em> the process’s memory, a lot of which
+will be shared (like shared libraries, the node binary itself, etc.), so it’s
+not as meaningful for our purposes. USS is measured by <a href="https://www.selenic.com/smem/"><code>smem</code></a>, but
+actually collecting the data required some ugly Bash:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> i <span class="kw">in</span> <span class="dt">{</span><span class="dv">1</span><span class="dt">..</span><span class="dv">30</span><span class="dt">}</span><span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> n <span class="kw">in</span> 9.11.2 11.15.0 13.14.0 15.14.0 17.9.1 19.9.0 main mine<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Fire off two node processes, so that the executable and</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    <span class="co"># shared libraries will be shared.</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    <span class="va">$n</span><span class="ex">/bin/node</span> <span class="at">--expose-gc</span> <span class="at">-e</span> <span class="st">'gc(),gc();while(1);'</span> <span class="kw">&amp;</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>    <span class="va">$n</span><span class="ex">/bin/node</span> <span class="at">--expose-gc</span> <span class="at">-e</span> <span class="st">'gc(),gc();while(1);'</span> <span class="kw">&amp;</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Delay until startup/GCs hopefully finish.</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">sleep</span> 1</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Collect the memory used by all processes.</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    <span class="ex">smem</span> <span class="kw">|</span> <span class="fu">tee</span> <span class="at">-a</span> <span class="va">$n</span>/smem_results</span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Kill the node processes.</span></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>    <span class="bu">kill</span> <span class="va">$(</span><span class="bu">jobs</span> <span class="at">-p</span><span class="va">)</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>  <span class="cf">done</span></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span></code></pre></div>
+<p>And now some <em>extra ugly</em> Bash to convert it into JSON. Note that each <code>smem</code>
+call gives us two node processes, so we use <code>paste</code>/<code>awk</code> to select the one
+which has a larger USS.</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> n <span class="kw">in</span> 9.11.2 11.15.0 13.14.0 15.14.0 17.9.1 19.9.0 main mine<span class="kw">;</span> <span class="cf">do</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="bu">printf</span> <span class="st">'{&quot;node_version&quot;:&quot;%s&quot;,&quot;memory&quot;:[%s]},\n'</span> <span class="va">$n</span> <span class="dt">\</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>      <span class="va">$(</span><span class="op">&lt;</span> <span class="va">$n</span>/smem_results <span class="fu">grep</span> /node <span class="dt">\</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>          <span class="kw">|</span> <span class="fu">awk</span> <span class="st">'{print $(NF-2)}'</span> <span class="dt">\</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>          <span class="kw">|</span> <span class="fu">paste</span> <span class="at">-</span> <span class="at">-</span> <span class="kw">|</span> <span class="fu">awk</span> <span class="st">'{print ($1&gt;$2?$1:$2)}'</span> <span class="dt">\</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>          <span class="kw">|</span> <span class="fu">paste</span> <span class="at">-sd,</span><span class="va">)</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="cf">done</span></span></code></pre></div>
+<p>And finally, the data goes into Vega-Lite to make a pretty chart.</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;$schema&quot;</span><span class="fu">:</span> <span class="st">&quot;https://vega.github.io/schema/vega-lite/v5.json&quot;</span><span class="fu">,</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;data&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;url&quot;</span><span class="fu">:</span> <span class="st">&quot;/assets/node-startup-memory-data.json&quot;</span><span class="fu">,</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;format&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;json&quot;</span><span class="fu">}</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;transform&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;flatten&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;memory&quot;</span><span class="ot">]</span><span class="fu">}</span><span class="ot">,</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>    <span class="fu">{</span><span class="dt">&quot;calculate&quot;</span><span class="fu">:</span> <span class="st">&quot;datum.memory/1024&quot;</span><span class="fu">,</span> <span class="dt">&quot;as&quot;</span><span class="fu">:</span> <span class="st">&quot;memory&quot;</span><span class="fu">}</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>  <span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mark&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;boxplot&quot;</span><span class="fu">,</span> <span class="dt">&quot;extent&quot;</span><span class="fu">:</span> <span class="st">&quot;min-max&quot;</span><span class="fu">},</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;encoding&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;x&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;node_version&quot;</span><span class="fu">,</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Node.js version&quot;</span><span class="fu">,</span></span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;nominal&quot;</span><span class="fu">,</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;sort&quot;</span><span class="fu">:</span> <span class="ot">[]</span><span class="fu">,</span></span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;axis&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;labelAngle&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">}</span></span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;y&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;memory&quot;</span><span class="fu">,</span></span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;quantitative&quot;</span><span class="fu">,</span></span>
+<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Unique Set Size (MiB)&quot;</span></span>
+<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span>
+<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;color&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Node.js version&quot;</span><span class="fu">,</span></span>
+<span id="cb7-27"><a href="#cb7-27" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;node_version&quot;</span><span class="fu">,</span></span>
+<span id="cb7-28"><a href="#cb7-28" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;nominal&quot;</span><span class="fu">,</span></span>
+<span id="cb7-29"><a href="#cb7-29" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;sort&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="cb7-30"><a href="#cb7-30" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span>
+<span id="cb7-31"><a href="#cb7-31" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb7-32"><a href="#cb7-32" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;config&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;numberFormat&quot;</span><span class="fu">:</span> <span class="st">&quot;.2&quot;</span><span class="fu">},</span></span>
+<span id="cb7-33"><a href="#cb7-33" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-34"><a href="#cb7-34" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;Unique set size of Node.js over the years&quot;</span></span>
+<span id="cb7-35"><a href="#cb7-35" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb7-36"><a href="#cb7-36" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;width&quot;</span><span class="fu">:</span> <span class="st">&quot;container&quot;</span><span class="fu">,</span></span>
+<span id="cb7-37"><a href="#cb7-37" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;height&quot;</span><span class="fu">:</span> <span class="dv">500</span></span>
+<span id="cb7-38"><a href="#cb7-38" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+    </section>
+    <section class="header">
+        
+        Posted on 2023-05-09
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

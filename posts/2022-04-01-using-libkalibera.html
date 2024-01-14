@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Using libkalibera for benchmark analysis</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Using libkalibera for benchmark analysis</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p><code>libkalibera</code> is an implementation of the technique described in
+<a href="https://kar.kent.ac.uk/33611/45/p63-kaliber.pdf">“Rigorous Benchmarking in Reasonable Time”</a> by Kalibera and Jones.
+It lets you determine, given certain benchmarking outputs, how many
+benchmark iterations to optimally make use of your compute time. It also
+provides facilities for computing the confidence intervals to estimate
+benchmark improvements and show statistical significance.</p>
+<p>It’s been used in <a href="https://soft-dev.org/src/libkalibera/">a couple of papers</a>, but as far as I can
+tell there is no real documentation on how to use it. So this is an
+(unofficial!) user guide about how to start using it yourself. In
+particular, I’ll be showing off the Python version <code>pykalibera</code>, but
+similar logic applies to the Ruby version.</p>
+<h3 id="installation">Installation</h3>
+<p>pykalibera isn’t in PyPI or anything, so just <code>git clone</code> the repo:</p>
+<pre><code>$ git clone https://github.com/softdevteam/libkalibera.git</code></pre>
+<p>then to use it, you’ll need to <code>cd</code> into the <code>python</code> directory:</p>
+<pre><code>$ cd libkalibera/python/
+$ python
+&gt;&gt;&gt; import pykalibera</code></pre>
+<p>If you are using Python 3, this won’t work, and you’ll need to apply the
+patch below.</p>
+<h3 id="patch-for-python-3">Patch for Python 3</h3>
+<p>If you are using Python 3, you’ll need to apply the patch below. You can
+do this by saving the patch below into a file, and then doing:</p>
+<pre><code>$ cd libkalibera/
+$ git apply {path to file}</code></pre>
+<p>Here is the patch:</p>
+<pre><code>diff --git a/python/pykalibera/data.py b/python/pykalibera/data.py
+index a07ceed..ee1115b 100644
+--- a/python/pykalibera/data.py
++++ b/python/pykalibera/data.py
+@@ -1,10 +1,11 @@
+ import math, itertools, random
++import base64
+ 
+ import bz2
+ 
+ from functools import wraps
+ 
+-constants = bz2.decompress(&quot;&quot;&quot;\
++constants = bz2.decompress(base64.b64decode(&quot;&quot;&quot;\
+ QlpoOTFBWSZTWbTS4VUAC9bYAEAQAAF/4GAOGZ3e40HH2YJERUKomGbCNMAAtMBaAkCOP9U0/R+q
+ qNCqfjAqVGOY3+qk96qmmIp+CCVNDD/1VGjfqkBJpIElG6uN92vE/PP+5IxhMIIgAbOxEMKLMVSq
+ VWtZmZaEklAAAttoAAAAAAAAAAAAEklAAEklABttkksklkkknVu2dX1vW9yWrkuXJJJJJJJJJJKK
+@@ -47,7 +48,7 @@ rJBfbPMSKZc3wmij3ULrhE9nIwoDMp4WAK2GkIKIqrHAK0Bjvo7sA2VZ941ggrwIsfGLZTHvGSZR
+ HrTVYQJbJ1e3y6B7LoCh5qyXWO03X5WbxWT0UvY55cyRbhmB8ib6lkhRo5USRAoLFA4WELV93ZV/
+ DKh2MIhnIWCPBLEh3FUTBSxJC7h4Z15qTFPTRmpe1Ldj1rlkVnAKHDySryior3OheiTPKZY2GaQ6
+ N2YyvJh9wuO75VOarCWLEUdLavAs2RShYOntLrMVabUAyDnTJIQ4deJa92pAWd6KBz+F3JFOFCQt
+-NLhVQA==&quot;&quot;&quot;.decode(&quot;base64&quot;))
++NLhVQA==&quot;&quot;&quot;))
+ 
+ constants = [float(x) for x in constants.split()]
+ 
+@@ -99,7 +100,7 @@ def confidence_slice(means, confidence=&quot;0.95&quot;):
+ 
+ def memoize(func):
+     &quot;&quot;&quot; The @memoize decorator &quot;&quot;&quot;
+-    attr = &quot;%s_%s&quot; % (func.func_name, id(func))
++    attr = &quot;%s_%s&quot; % (func.__name__, id(func))
+     @wraps(func)
+     def memoized(self, *args, **kwargs):
+         d = self._memoization_values</code></pre>
+<h3 id="what-libkalibera-does">What <code>libkalibera</code> does</h3>
+<p>The idea behind <code>libkalibera</code> is that you have a benchmark and you want
+to know how many times you want to run it. There may also be multiple
+<em>levels</em>. For example, let’s consider the following benchmarking
+methodology. Here we will have three levels, although you can have more
+or less.</p>
+<ul>
+<li><p><strong>Level 3</strong>: You compile the program you are going to benchmark 10 times. Because
+of non-determinism in your build system, each executable created is
+slightly different.</p></li>
+<li><p><strong>Level 2</strong>: You run the compiled program 20 times. Because of
+non-determinism of things like ASLR and LTO, each process will perform
+slightly differently. The process starts out by running the benchmark
+10 times as a “warmup” step.</p></li>
+<li><p><strong>Level 1</strong>: After the “warmup” completes, you do a loop which
+executes your benchmark 30 times. Because of non-determinism in your
+program or external factors (caches, context switches, CPU throttling,
+etc.), each iteration performs slightly differently.</p></li>
+</ul>
+<p>This would in total require <span class="math inline">10 * 20 * (10 + 30) = 8000</span> executions of
+the actual benchmark, which is a lot. We’ll call the <em>runtime costs</em>
+associated with each level <span class="math inline">c_3, c_2, c_1</span> respectively. So for example:</p>
+<ul>
+<li><span class="math inline">c_3</span>: time to build the program</li>
+<li><span class="math inline">c_2</span>: time for the process start + finishing the warmup steps</li>
+<li><span class="math inline">c_1</span>: time to do one iteration of the benchmark</li>
+</ul>
+<p>After doing this many executions, you may have confidence in your
+results. But could you have done with less executions? The idea behind
+<code>libkalibera</code> is that you’ll first do an <em>initial experiment</em> to
+determine the optimal amount of executions for later <em>real experiments</em>.</p>
+<p>The first step of using <code>libkalibera</code> is to get the data into a <code>Data</code>
+class. Here’s an example of how you would do that:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pykalibera.data</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>level3_iterations <span class="op">=</span> <span class="dv">10</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>level2_iterations <span class="op">=</span> <span class="dv">20</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>level1_iterations <span class="op">=</span> <span class="dv">30</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>dictionary <span class="op">=</span> <span class="bu">dict</span>()</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> l3 <span class="kw">in</span> <span class="bu">range</span>(level3_iterations):</span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="cf">for</span> l2 <span class="kw">in</span> <span class="bu">range</span>(level2_iterations):</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Set dictionary[(l3, l2)] to a list </span></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>        <span class="co"># of benchmark timings EXCLUDING the</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>        <span class="co"># warmup iterations</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>        non_warmup_steps <span class="op">=</span> <span class="co"># ...</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>        <span class="cf">assert</span> <span class="bu">len</span>(non_warmup_steps) <span class="op">==</span> level1_iterations</span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>        dictionary[(l3, l2)] <span class="op">=</span> non_warmup_steps</span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>reps <span class="op">=</span> (level3_iterations, level2_iterations,</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>        level1_iterations)</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>d <span class="op">=</span> pykalibera.data.Data(dictionary, reps)</span></code></pre></div>
+<p>Before continuing, you should verify the assumption that the timings of
+each iteration of the benchmark are independent of each other and
+identically distributed. Of course, it’s impossible to prove that this
+is true, so instead we’ll try to find reasons it’s <em>not</em> true.</p>
+<p>The first reason is that you may not have warmed up the benchmark
+enough, especially if you’re benchmarking a JIT language which requires
+a lot of warmup. You can usually see this via visual inspection of the
+plots – here’s of a benchmark which does not do enough warmup. The
+sudden drop after the first few iterations suggests this:</p>
+<center>
+<img src="../assets/sequence-plot-no-warmup.png" />
+</center>
+<p>If this happens, you should probably include more runs. See <a href="#number-of-warmups">Determining
+the number of warmup iterations needed</a> for more
+information about how to determine the number of warmups.</p>
+<p>Another common reason is that the residuals are “autocorrelated” – i.e.
+if one iteration of the benchmark depends on a previous one. You can
+check if this is the case via <code>statsmodel</code>:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> statsmodel <span class="im">as</span> sm</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>s <span class="op">=</span> pd.Series(benchmark_timings)</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>sm.graphics.tsa.plot_acf(s, lags<span class="op">=</span><span class="dv">10</span>)</span></code></pre></div>
+<p>For example, the following graph shows a low autocorrelation which
+eliminates one possibly cause of unsuitability. Here’s what a good graph
+looks like. It’s good because all of the autocorrelations are below the
+threshold for statistical significance, suggesting that they’re likely
+to be noise:</p>
+<center>
+<img src="../assets/acf-low.png" />
+</center>
+<h3 id="how-many-times-do-i-need-to-run-my-benchmarks">How many times do I need to run my benchmarks?</h3>
+<p>First, we’ll figure out how many times you need to run each level!
+Run <code>d.Ti2(i)</code> where <code>i</code> is the level. If it’s <span class="math inline">\le 0</span>, then you only
+need to run this level once! Otherwise, you’ll need to do more work to
+determine this correct number of repetitions.</p>
+<p><code>d.optimalreps(i, costs)</code> will tell you how many times you should run
+the <code>i</code>th level. <code>costs</code> should be a list of costs for each level, from
+high to low. So for example, let’s say that it takes 600 seconds to
+build your application (<span class="math inline">c_3</span>), 30 seconds to warmup the benchmark
+(<span class="math inline">c_2</span>) and then 20 seconds to run the actual benchmars (<span class="math inline">c_1</span>). Then
+you should pass in <code>costs = [600, 30, 20]</code>.
+For example, <code>d.optimalreps(1, [600, 30, 20]) = 25</code> would mean that you
+should use 25 iterations at Level 1, not 30 like we did originally.</p>
+<p>Note that <code>d.optimalreps</code> will throw if you pass in the highest level
+(in our case, <code>i = 3</code>). This is because the optimal number of times to
+run the highest level depends on the accuracy you want from your
+benchmarking suite. You can always get more accurate results by
+iterating the top-level more times. Remember that “optimal” here is
+referring to the cost/accuracy tradeoff, so you can get more accurate
+results at a higher cost.</p>
+<h3 id="confidence-intervals">Confidence Intervals</h3>
+<p>You can get a 95% confidence interval for the mean benchmark time using
+bootstrap:</p>
+<pre><code>&gt;&gt;&gt; d.bootstrap_confidence_interval(confidence=&quot;0.95&quot;)
+(387551372.5, 388219399.3325, 389102520.205)</code></pre>
+<p>The first number is the 2.5th percentile, the second is the median of
+the means of the bootstrap, and the third is the 97.5th percentile.</p>
+<p>You can also use the parametric method <code>confidence95</code> if you are
+confident that your data satisfies the CLT. It will likely result in
+tighter confident intervals. I personally do not recommend this since
+the assumptions are difficult to verify.</p>
+<p>If you have another data set, you can compare the two via
+<code>bootstrap_quotient</code>. This returns a confidence interval for the
+quotient of sample mean times between <code>d</code> and <code>other</code>.</p>
+<pre><code>&gt;&gt;&gt; d.bootstrap_quotient(other)
+(0.9970837820037386, 0.9999710061391922, 1.002867547532627)</code></pre>
+<p>In this case the two results are not statistically significantly
+different, since the confidence interval contains 1. This is a ratio of
+the runtimes, so a value less than 1 would indicate a speedup, and a
+value greater than one would indicate a slowdown.</p>
+<p>See <a href="https://www.cs.kent.ac.uk/pubs/2012/3233/content.pdf">the paper</a> for more information on these confidence
+intervals, along with details for the bootstrap method.</p>
+<p><span id="number-of-warmups"></span></p>
+<h3 id="determining-the-number-of-warmup-iterations-needed">Determining the number of warmup iterations needed</h3>
+<p>The above discussion doesn’t tell you how to choose the correct number
+of warmup iterations. <code>pykalibera</code> does not provide functionality for this. I used
+<a href="https://ctruong.perso.math.cnrs.fr/ruptures-docs/build/html/general-info.html#installation"><code>ruptures</code></a>
+for <em>changepoint analysis</em> to some effect. See <a href="https://tratt.net/laurie/essays/entries/why_arent_more_users_more_happy_with_our_vms_part_1.html">Why Aren’t More Users
+More Happy With Our VMs? Part 1</a> for more information about how
+to use changepoint analysis to determine when the warmup period is over.</p>
+<h3 id="on-pykalibera.graphs">On <code>pykalibera.graphs</code></h3>
+<p>The functions in <code>pykalibera.graphs</code> reproduce the graphs shown in
+<a href="https://kar.kent.ac.uk/33611/45/p63-kaliber.pdf">Figure 1</a> of the paper. Personally, I wouldn’t use these. The
+functionality is pretty standard and can be provided by a lot of
+different libraries. Here are the equivalents I use for a Pandas series
+called <code>s</code>:</p>
+<ul>
+<li><code>run_sequence_plot</code>: <a href="https://seaborn.pydata.org/">seaborn’s</a> <code>lineplot(s)</code> is equivalent.</li>
+<li><code>lag_plot</code>: seaborn’s <code>scatterplot(y=s, x=s.shift(1))</code>
+does the equivalent for a shift of 1.</li>
+<li><code>acr_plot</code>: <a href="https://www.statsmodels.org/stable/index.html">statsmodel’s</a> <code>graphics.tsa.plot_acf(s)</code> is
+better, and also shows which of the correlations are statistically
+significant.</li>
+</ul>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-04-01
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

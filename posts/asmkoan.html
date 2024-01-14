@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Ten tips for writing tiny x86 programs</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Ten tips for writing tiny x86 programs</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p><a href="../assets/asmkoan.pdf">This blog post is also available as a pretty PDF.</a></p>
+<p>Recently I wrote an x86 assembler in 512 bytes of machine code:
+<a href="https://github.com/kvakil/0asm" class="uri">https://github.com/kvakil/0asm</a>. This is called a “bootsector” program,
+because it fits in a typical hard-drive sector. This zine will give you
+pointers on writing bootsector x86 programs of your own, assuming
+familiarity with x86 assembly.</p>
+<p><strong>x86 resources I found useful:</strong></p>
+<ul>
+<li>80x86 is an octal machine: <a href="https://bit.ly/2OYLHLI" class="uri">https://bit.ly/2OYLHLI</a> Good pseudocode,
+and information about the ISA.</li>
+<li>80386 reference manual: <a href="https://bit.ly/2OELlLr" class="uri">https://bit.ly/2OELlLr</a> (particularly
+Chapter 17, and the appendices)</li>
+</ul>
+<p><strong>Ten Tips:</strong></p>
+<ol type="1">
+<li><p><strong>Baby’s first bootsector:</strong> You could write a bootsector from
+scratch, but I’ve made a bootsector skeleton to extract common
+scaffolding: <a href="https://github.com/kvakil/boot-skel" class="uri">https://github.com/kvakil/boot-skel</a>.
+It also provides some nice debugging features–see the
+repository for details!</p></li>
+<li><p><strong>Use registers for their purpose:</strong></p>
+<ul>
+<li><code>sp</code>: use as stack pointer, too good to pass up.</li>
+<li><code>ax</code>: aim for comparisons to operate on <code>ax</code>, many instructions are
+shorter when they use <code>ax</code>. (For example, <code>cmp ax,1</code> is shorter than
+<code>cmp bx,1</code>.)</li>
+<li><code>cx</code>: useful as a loop counter: see <code>loop</code>, <code>rep</code>, and <code>jcxz</code>
+instructions.</li>
+<li><code>si</code>, <code>di</code>: use as source and destination of memory accesses
+(respectively): used by some instructions, especially <code>lodsb</code>,
+<code>stosb</code>, …. Prefer these to <code>mov</code> since they are shorter and
+increment the pointers!</li>
+<li><code>bx</code>, <code>bp</code>: can be used for addressing, like <code>mov ax,[bx]</code>.
+Generally <code>bx</code> is better than <code>bp</code> because the common zero offset
+case like <code>mov ax,[bx+0]</code> is a byte shorter than <code>mov ax,[bp+0]</code>
+(Table 17-2 in manual).</li>
+<li><code>dx</code>: used by <code>div</code> and <code>mul</code>, otherwise not useful.</li>
+</ul></li>
+<li><p><strong>Know the instruction set:</strong> here is a non-exhaustive tier ranking
+of instructions you probably haven’t seen.</p>
+<ul>
+<li>Useful: <code>lodsb</code>, <code>stosb</code>, <code>inc</code>, <code>dec</code>, <code>xchg</code>.</li>
+<li>Sometimes useful: <code>cbw</code>, <code>scasb</code>, <code>movsb</code>, <code>loop</code>, <code>stc</code>, <code>clc</code>,
+<code>neg</code>, <code>not</code>, carry flag stuff like <code>adc</code>.</li>
+<li>Usually useless: anything else (especially BCD instructions like
+<code>aaa</code>).</li>
+</ul></li>
+<li><p><strong>Use <code>FLAGS</code>:</strong> almost all instructions affect the <code>FLAGS</code> register
+(Appendix C of manual). Because conditional jumps rely on <code>FLAGS</code>,
+aim to have your function return boolean results in <code>FLAGS</code>.
+Instructions like <code>stc</code> let you manipulate flags manually, but try
+to have your code correctly modify <code>FLAGS</code> without them to save
+bytes.</p></li>
+<li><p><strong>Forget calling conventions:</strong> you should think of functions as
+common snippets of code which may affect many registers. Using any
+“result” register may be useful. Any time you use <code>push</code>/<code>pop</code> or
+<code>leave</code> should be suspect. This also typically makes it easier to
+reuse code snippets between functions.</p></li>
+<li><p><strong>Know the idioms:</strong> there are many “peephole” optimizations
+possible, I’ll just list the ones I find most useful. The best way
+to find them is by reading through other people’s code or by mucking
+around with the instruction set.</p>
+<ul>
+<li><p><em>Zeroes:</em> rather than <code>mov ax,0</code> (3 bytes) use <code>xor ax,ax</code> (2
+bytes). Similarly instead of <code>cmp ax,0</code> (3 bytes) use <code>test ax,ax</code>
+(2 bytes).</p></li>
+<li><p><em>Prefer <code>xchg</code> to <code>mov</code>:</em> If you are moving a register to or from
+<code>ax</code>, consider using <code>xchg</code> (1 byte) instead of using <code>mov</code> (2
+bytes). This is also useful since some instructions must use <code>ax</code> or
+have shorter encodings when they do.</p></li>
+<li><p><em>Shifts to multiply:</em> You can use bitshifting to multiply or divide
+by powers of two.</p></li>
+<li><p><em>Set register to -CF:</em> <code>sbb bl,bl</code> (2 bytes) sets
+<code>bl = -carry flag</code>. If you are OK with setting <code>al</code> instead of
+another register, you can use the undocumented instruction <code>salc</code> (1
+byte). Since <code>-1</code> has all bits set and <code>0</code> has no bits set (in two’s
+complement), this is useful as a bitmask.</p></li>
+<li><p><em>Tail call</em>: if you have <code>call F &amp; ret</code> (typically at the end of a
+function), you can replace this with just <code>jmp F</code>, saving up to two
+bytes. You can also remove the <code>jmp</code> completely by moving <code>F</code>
+inline, but of course you can only inline once.</p></li>
+</ul></li>
+<li><p><strong>Beware <code>rel16</code> jumps:</strong> if you jump farther than 127 bytes,
+you use a long jump (costing an extra byte), and your assembler
+won’t tell you! Check the assembly listing to monitor for these, and
+reorder your code as appropriate.</p></li>
+<li><p><strong>Beware unconditional jumps:</strong> jumping using a condition (like
+<code>jc</code>) doesn’t cost more than jumping unconditionally. Unconditional
+jumps with a nearby conditional jump are usually a sign that the
+code can be refactored to a single conditional jump (typically by
+rewriting a <code>while</code>-loop as a <code>do-while</code>-loop).</p></li>
+<li><p><strong>Self-modifying code:</strong> rarely useful, but very cool when it works.
+One use is global variables (saving one byte over the naïve
+solution). For example, this creates a counter starting at 1234:</p></li>
+</ol>
+<div class="sourceCode" id="cb1"><pre class="sourceCode nasm"><code class="sourceCode nasm"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">LA:</span> <span class="kw">mov</span> <span class="kw">ax</span><span class="op">,</span><span class="dv">1234</span> <span class="co">; initial value is 1234</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>    <span class="co">; LA+1 is the address of 1234</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">mov</span> <span class="kw">bx</span><span class="op">,</span>LA<span class="op">+</span><span class="dv">1</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    <span class="co">; use ax as counter value</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    <span class="kw">inc</span> <span class="dt">word</span> <span class="op">[</span><span class="kw">bx</span><span class="op">]</span> <span class="co">; increment counter</span></span></code></pre></div>
+<ol start="10" type="1">
+<li><strong>Ignore these rules:</strong> these are just guidelines which I’ve found
+<em>typically</em> reduce code size. It’s very difficult to write a small
+program, so all of these are really just heuristics. Happy hacking!</li>
+</ol>
+    </section>
+    <section class="header">
+        
+        Posted on 2020-11-23
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

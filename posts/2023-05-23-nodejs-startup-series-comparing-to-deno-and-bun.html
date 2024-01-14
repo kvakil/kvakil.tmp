@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Node.js Startup: comparing to Deno &amp; Bun</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Node.js Startup: comparing to Deno &amp; Bun</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'nodejs-startup'." href="../tags/nodejs-startup.html" rel="tag">nodejs-startup</a></p>
+        <p>A blog reader suggested that we also benchmark startup for two up-and-coming
+Javascript runtimes: <a href="https://deno.com/">Deno</a> &amp; <a href="https://bun.sh/">Bun</a>. Both
+of these runtimes are less mature than Node.js, and startup time is a very
+narrow benchmark, so please don’t interpret anything here as being some sort of
+general statement.</p>
+<p>Because these runtimes are evolving so fast, here’s the versions I’m
+using for testing:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> ~/.deno/bin/deno <span class="at">--version</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="ex">deno</span> 1.33.2 <span class="er">(</span><span class="ex">release,</span> x86_64-unknown-linux-gnu<span class="kw">)</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">v8</span> 11.4.183.1</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">typescript</span> 5.0.3</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> ~/.bun/bin/bun <span class="at">--version</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="ex">0.5.9</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> node <span class="at">--version</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="ex">v21.0.0-pre</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="co"># (4040a904dedfae8e1a60cc29ed78aab7945d272f)</span></span></code></pre></div>
+<p>Now we can collect the startup time &amp; memory usage <a href="../posts/2023-05-09-nodejs-startup-series-intro-and-measuring-startup-time.html">using the same methodology
+as in the intro</a>.</p>
+<p>Bun’s startup is significantly (3x) faster than both Deno’s and Node’s.
+Applying all of my improvements to Node closes the gap to ~2x:</p>
+<script type="text/javascript" src="../assets/vega@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-lite@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-embed@6.js" defer></script>
+<script type="text/javascript" src="../assets/nodejs-startup-intro-vl.js" defer></script>
+<center>
+<div id="vis-runtime" style="width: 650px;max-width:100%" data-filename="/assets/nodejs-startup-bun-deno-timings.json" data-title="Runtime comparison" data-facet="Runtime">
+
+</div>
+<noscript>
+Sorry, you need Javascript to view this plot. Do you read this blog
+without Javascript? Please email me at <code>ken@kvakil.me</code>.
+</noscript>
+</center>
+Memory usage is a little more competitive. Bun and Deno both use a fair
+bit more memory, Node.js uses much less once my patches are applied:
+<center>
+<div id="vis-memory" style="width: 650px;max-width:100%" data-filename="/assets/nodejs-startup-bun-deno-memory.json" data-title="Unique set size comparison" data-facet="Runtime">
+
+</div>
+<noscript>
+Sorry, you need Javascript to view this plot. Do you read this blog
+without Javascript? Please email me at <code>ken@kvakil.me</code>.
+</noscript>
+</center>
+<p>It’ll be interesting to see how these two runtimes evolve: it’s possible
+they’ll end up slower than Node as they add more features, or maybe
+Bun’s JSC core is just intrinsically better suited for fast startup than
+Node/Deno’s V8.</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2023-05-23
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

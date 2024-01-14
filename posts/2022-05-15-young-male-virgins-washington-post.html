@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Washington Post's 'Young male virginity on the rise' Graph</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Washington Post's 'Young male virginity on the rise' Graph</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'data'." href="../tags/data.html" rel="tag">data</a></p>
+        <p>This graph periodically shows up on Reddit and other news aggregators:</p>
+<p><img src="../assets/ymvwp/graph.jpeg" /></p>
+<p>This graph is frequently accompanied by comments claiming that it has
+been falsified:</p>
+<ul>
+<li><a href="https://web.archive.org/web/20220516061336/https://old.reddit.com/r/Damnthatsinteresting/comments/upqt02/young_male_virginity_on_the_rise/i8npcxq/">“After my dive on the interwebs it seems that this graph does not show male virginity. Thats a lie to push some incel narrative.”</a></li>
+<li><a href="https://web.archive.org/web/20220516062016/https://old.reddit.com/r/PurplePillDebate/comments/b93x9k/people_are_misinterpreting_that_washington_post/ek265tb/">“The original WaPo article … did not talk about anything about virginity.”</a></li>
+<li><a href="https://web.archive.org/web/20220516061025/https://old.reddit.com/r/dataisbeautiful/comments/upv1uy/oc_young_male_virginity_on_the_rise/i8ncozt/">“This appears totally fabricated.”</a></li>
+</ul>
+<p>I was interested in figuring out if this was real or not.</p>
+<h2 id="yes-wapo-published-this-graph">Yes, WaPo published this graph</h2>
+<p>First, let’s note that a Washington Post journalist <em>did</em> publish this
+graph. It doesn’t appear <a href="https://www.washingtonpost.com/business/2019/03/29/share-americans-not-having-sex-has-reached-record-high/">in the actual article</a> (nor in <a href="https://web.archive.org/web/20190329125246/https://www.washingtonpost.com/business/2019/03/29/share-americans-not-having-sex-has-reached-record-high/">the
+oldest archived version</a>), but it is in <a href="https://twitter.com/_cingraham/status/1111629177575350279">a promotional tweet
+from the article’s author Christopher Ingraham</a>
+(<a href="https://web.archive.org/web/20220511222741/https://twitter.com/_cingraham/status/1111629177575350279">archived</a>) which contains the chart:</p>
+<blockquote>
+<p>Stunning chart: the share of men under 30 who aren’t having sex has
+nearly tripled in the past decade</p>
+<p>– @_cingraham (March 29, 2019)</p>
+</blockquote>
+<p>I suspect that part of the confusion is that the WaPo article itself
+shows a <em>similar</em> graph (% of men who haven’t had sex in the
+last year), but not this graph which is more commonly cited.</p>
+<h2 id="yes-the-graph-is-based-on-gss-data">Yes, the graph is based on GSS data</h2>
+<p>Let’s see if we can reproduce the actual graph using <a href="https://gss.norc.org/">The General
+Social Survey</a> (GSS) data. With <a href="https://gssdataexplorer.norc.org/variables/vfilter">GSS’s search data</a> tool,
+we can find the variables we need. The dependent variable
+we want to analyze is <a href="https://gssdataexplorer.norc.org/variables/5060/vshow"><code>numwomen</code></a>. Our independent variable will be
+<code>year</code>. We’ll want to filter based on <code>sex</code> and <code>age</code>.</p>
+<p>The easiest way to do perform a quick analysis on GSS seems to be to use
+<a href="https://sda.berkeley.edu/">UC Berkeley’s SDA</a> program, which handles a lot of the gotchas of
+working with GSS for you. In particular, the following configuration
+will reproduce the graph:</p>
+<ul>
+<li><a href="https://sda.berkeley.edu/sdaweb/analysis/?dataset=gss21">Analyze this dataset.</a></li>
+<li>Under “Tables”, configure:
+<ul>
+<li>Row: <code>year</code>.</li>
+<li>Column: <code>numwomen(d:0)</code> (create a dummy variable for if
+<code>numwomen</code> equals 0).</li>
+<li>Weight: <code>compwt</code> (<a href="https://gss.norc.org/Lists/gssFAQs/DispForm.aspx?ID=11">GSS needs weighting</a>).</li>
+<li>Filter: <code>sex(1),age(18-29)</code> (filter to men aged 18-29).</li>
+</ul></li>
+<li>Under “Output Options”, configure:
+<ul>
+<li>Change “Percentaging” from “Column” to “Row”.</li>
+<li>Add 95% confidence intervals.</li>
+</ul></li>
+<li>Under “Chart Options”, change “Type of chart” to “Line chart”.</li>
+</ul>
+<p>Here is the <a href="https://sda.berkeley.edu/sdaweb/analysis/exec?formid=tbf&amp;sdaprog=tables&amp;dataset=gss21&amp;sec508=false&amp;row=year&amp;column=numwomen%28d%3A0%29&amp;filters=sex%281%29%2Cage%2818-29%29&amp;weightlist=compwt&amp;rowpct=on&amp;design=complex&amp;cflevel=95&amp;weightedn=on&amp;color=on&amp;ch_type=line&amp;ch_showpcts=on&amp;ch_color=yes&amp;ch_width=900&amp;ch_height=600&amp;decpcts=1&amp;decse=1&amp;decdeft=3&amp;decwn=1&amp;decstats=2&amp;csvformat=no&amp;csvfilename=tables.csv">resulting table</a>, and here is the graph:</p>
+<figure>
+<img src="../assets/ymvwp/sda_result.png" alt="Graph from SDA analysis. Ignore the red line. The blue line is a reproduction of the WaPo graph, with 2021 data included." />
+<figcaption aria-hidden="true">Graph from SDA analysis. Ignore the red line. The blue line is a reproduction of the WaPo graph, with 2021 data included.</figcaption>
+</figure>
+<p>The graph is almost identical to WaPo’s graph. There’s a small rounding
+difference (our graph shows 26.4% in 2018 versus WaPo’s reported 27%),
+but other than that the data is essentially accurate.</p>
+<p>SDA also calculates confidence intervals. This is non-trivial since the
+GSS is a complex clustered sample (not a simple random sample) and
+therefore calculating the confidence intervals is a little harder than
+usual.</p>
+<p>I wanted to create a version of the graph with the confidence interval
+bars. I got the data into a CSV using SDA’s export functionality, and
+then it was a matter of some Python code to get it into a nice graphing
+format:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> pandas <span class="im">as</span> pd</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>df <span class="op">=</span> pd.read_csv(</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;sda_export.csv&quot;</span>,</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    header<span class="op">=</span><span class="va">None</span>,</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    names<span class="op">=</span>[<span class="st">&quot;type&quot;</span>, <span class="st">&quot;year&quot;</span>, <span class="st">&quot;ignore&quot;</span>, <span class="st">&quot;virgins&quot;</span>, <span class="st">&quot;tot&quot;</span>],</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>p <span class="op">=</span> df.pivot(index<span class="op">=</span>[<span class="st">&quot;year&quot;</span>], columns<span class="op">=</span>[<span class="st">&quot;type&quot;</span>], values<span class="op">=</span>[<span class="st">&quot;virgins&quot;</span>])</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="bu">print</span>(</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    p[<span class="st">&quot;virgins&quot;</span>]</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    .rename(</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>        columns<span class="op">=</span>{</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;CI-high 95 (Row percent)&quot;</span>: <span class="st">&quot;hi&quot;</span>,</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;CI-low 95 (Row percent)&quot;</span>: <span class="st">&quot;lo&quot;</span>,</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;Row percent&quot;</span>: <span class="st">&quot;mean&quot;</span>,</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>    )</span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>    .reset_index()</span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>    .to_json(orient<span class="op">=</span><span class="st">&quot;records&quot;</span>)</span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<p>The output “records”-orientated JSON format is perfect for graphing in
+Vega-Lite.</p>
+<div id="vis" style="width: 100%">
+<p><img src="../assets/ymvwp/vegalite.png" loading="lazy"></p>
+</div>
+<script type="text/javascript" src="../assets/vega@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-lite@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-embed@6.js" defer></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+const spec = {"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"values":[{"year":1989,"hi":13.3,"lo":3.8,"mean":7.2},{"year":1990,"hi":15.9,"lo":3.3,"mean":7.4},{"year":1991,"hi":21.3,"lo":7,"mean":12.5},{"year":1993,"hi":24,"lo":10.6,"mean":16.2},{"year":1994,"hi":18.8,"lo":7.9,"mean":12.4},{"year":1996,"hi":14.1,"lo":5.3,"mean":8.8},{"year":1998,"hi":23.9,"lo":12.3,"mean":17.3},{"year":2000,"hi":18.4,"lo":8.5,"mean":12.6},{"year":2002,"hi":16.1,"lo":6.1,"mean":10},{"year":2004,"hi":21.9,"lo":10.1,"mean":15.1},{"year":2006,"hi":15.4,"lo":4.9,"mean":8.8},{"year":2008,"hi":16.4,"lo":4.1,"mean":8.3},{"year":2010,"hi":18.3,"lo":6.7,"mean":11.2},{"year":2012,"hi":20.9,"lo":7.7,"mean":12.9},{"year":2014,"hi":25.7,"lo":10.8,"mean":17},{"year":2016,"hi":28.1,"lo":13.8,"mean":20},{"year":2018,"hi":37.3,"lo":17.8,"mean":26.4},{"year":2021,"hi":33.3,"lo":12.8,"mean":21.3}]},"transform":[{"calculate":"datum.lo - datum.mean","as":"lo"},{"calculate":"datum.hi - datum.mean","as":"hi"},{"calculate":"datetime(datum.year, 0)","as":"year"}],"title":{"text":"% of men aged 18-29 who have not had sex with a woman since 18","fontSize":18,"subtitle":"Source: General Social Surveys | NORC"},"width":"container","height":600,"layer":[{"mark":{"type":"errorbar","ticks":{"color":"teal"},"color":"teal"},"encoding":{"y":{"field":"mean","type":"quantitative","scale":{"zero":true},"title":"Percent","axis":{"tickCount":8}},"yError":{"field":"lo"},"yError2":{"field":"hi"},"x":{"field":"year","type":"temporal","title":"Year","axis":{"grid":false}}}},{"mark":{"type":"line","point":true},"encoding":{"y":{"field":"mean","type":"quantitative"},"x":{"field":"year","type":"temporal"}}}],"config":{"scale":{"continuousPadding":16}}};
+vegaEmbed("#vis", spec, {mode: "vega-lite"}).then(console.log).catch(console.warn);
+});
+</script>
+<p>As we can see, the error bars are actually quite large!</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>The “Young male virgins” graph was published by WaPo and is
+substantiated by the GSS data. A lot of the confusion on the internet
+seems to be caused by the attributed graph only appearing on Twitter and
+not in the actual article. It is unfortunate that the article does not
+include information or justification for how the GSS data was used. I
+think the WaPo graph should also have included the error bars so that
+readers could make their own inferences about the proposed “trend”.</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-05-15
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Node.js Startup: Removing code cache copies</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Node.js Startup: Removing code cache copies</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'nodejs-startup'." href="../tags/nodejs-startup.html" rel="tag">nodejs-startup</a>, <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        In <a href="../posts/2023-05-10-nodejs-startup-series-profiling.html">an earlier
+post</a> of <a href="../tags/nodejs-startup.html">this
+series</a>, we successfully captured a profile of Node.js’s
+startup. I noticed from the CPU profiles that there was a lot of memory
+copying:
+<center>
+<object type="image/svg+xml" data="../assets/nodejs-startup-flamegraph.svg?s=null&amp;x=859.0&amp;y=100" style="max-width: 100%">
+</object>
+</center>
+<p>Finding the sources of these copies was pretty easy: I set a breakpoint
+on <code>memmove</code>, looked at the backtrace to try to figure out why the copy
+was occurring, and did some refactoring to remove it. A lot of the
+memory copies came from unnecessary copies of the “code cache”.
+Javascript typically gets compiled into <a href="https://en.wikipedia.org/wiki/Bytecode">bytecode</a> before execution.
+Node.js also stores the compiled bytecode for all of its builtin
+modules. (For those familiar with Python, this is like a version of
+<code>__pycache__</code> only for builtin modules.)</p>
+<p>One interesting (&amp; in retrospect, obvious) source of copies was code like this:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="at">const</span> <span class="dt">uint8_t</span> data<span class="op">[]</span> <span class="op">=</span> <span class="op">{</span><span class="dv">1</span><span class="op">,</span> <span class="dv">2</span><span class="op">,</span> <span class="dv">3</span><span class="op">,</span> <span class="dv">4</span><span class="op">};</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="bu">std::</span>vector<span class="op">&lt;</span><span class="dt">uint8_t</span><span class="op">&gt;</span> data_vec<span class="op">{</span>data<span class="op">,</span> data <span class="op">+</span> <span class="kw">sizeof</span><span class="op">(</span>data<span class="op">)};</span></span></code></pre></div>
+<p>Creating <code>data_vec</code> requires copying <code>data</code> onto the heap. This was pretty easy
+to fix by just changing the users to deal with <code>const uint8_t*</code> instead.</p>
+<p>While fixing this issue, I noticed something strange about the bytecode cache.
+Here is a pseudo-code implementation of the bytecode cache:</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>compileModule<span class="op">(</span>string id<span class="op">,</span> string function<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    cached_bytecode <span class="op">=</span> NULL<span class="op">;</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>cache<span class="op">.</span>has<span class="op">(</span>id<span class="op">))</span> <span class="op">{</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>        cached_bytecode <span class="op">=</span> cache<span class="op">.</span>remove<span class="op">(</span>id<span class="op">);</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    compiled_function <span class="op">=</span> Compile<span class="op">(</span>function<span class="op">,</span> cached_bytecode<span class="op">);</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    <span class="co">// (Compile consumes cached_bytecode,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="co">//  it can no longer be used.)</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    cache<span class="op">.</span>add<span class="op">(</span>id<span class="op">,</span> compiled_function<span class="op">.</span>get_bytecode<span class="op">());</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>Unfortunately re-populating the cache with <code>compiled_function.get_bytecode()</code> was
+not cheap! In fact, the bytecode cache was <em>slowing down</em> the
+compilation time rather than speeding it up: it would have been cheaper
+(from a startup perspective) to just not have the cache at all.</p>
+<p>The solution is pretty simple: we leave the bytecode in the cache instead of
+removing it. This requires changing some code so that <code>cached_bytecode</code> can be
+reused multiple times, but <a href="https://github.com/nodejs/node/pull/47958">that was pretty tractable</a>. In addition
+to speeding up the “empty” startup, this made the average Node.js builtin
+module around 20% faster to require, which should speedup startup even more for
+real-world use-cases.</p>
+<p>Combining this optimization with another one <a href="https://github.com/nodejs/node/pull/47144/">which removes another unnecessary
+copy</a>, we get a nice 12%
+improvement in startup time:</p>
+<script type="text/javascript" src="../assets/vega@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-lite@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-embed@6.js" defer></script>
+<script type="text/javascript" src="../assets/nodejs-startup-intro-vl.js" defer></script>
+<center>
+<div id="vis-runtime" style="width: 650px;max-width:100%" data-filename="/assets/nodejs-startup-pt2-timings.json" data-title="Runtime of main before &amp; after change">
+
+</div>
+<noscript>
+Sorry, you need Javascript to view this plot. Do you read this blog
+without Javascript? Please email me at <code>ken@kvakil.me</code>.
+</noscript>
+</center>
+<p>and by removing the extra copies floating around in memory, we also get a solid
+decrease in unique set size:</p>
+<center>
+<div id="vis-memory" style="width: 650px;max-width:100%" data-filename="/assets/nodejs-startup-pt2-memory.json" data-title="Unique set size before &amp; after change">
+
+</div>
+<noscript>
+Sorry, you need Javascript to view this plot. Do you read this blog
+without Javascript? Please email me at <code>ken@kvakil.me</code>.
+</noscript>
+</center>
+    </section>
+    <section class="header">
+        
+        Posted on 2023-05-22
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

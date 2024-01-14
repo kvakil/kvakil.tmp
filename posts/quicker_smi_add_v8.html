@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Speeding up Javascript addition</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Speeding up Javascript addition</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p><em>Assumed</em>: knowledge of JIT compilers, knowledge of x86 assembly.</p>
+<p>All numbers in Javascript are doubles. But NodeJS’s Javascript engine,
+V8, doesn’t represent them that way.</p>
+<p>V8 has an optimization for SMall Integers (aka Smis). An Smi is an
+integer between <span class="math inline">-2^{31}</span> and <span class="math inline">2^{31} - 1</span>. Smis are stored in the high
+32 bits of 64 bit words. V8 uses the last bit for “tagging” whether the
+object is a pointer or an Smi.</p>
+<pre><code>            |---high 32 bits ---|--- low 32 bits ---|
+Pointer:    |________________address_____________001|
+Smi:        |____int32_value____|0000000000000000000|
+                                                   ^
+                                                   |
+                                   this is a tag bit</code></pre>
+<p>We will call this representation the <em>tagged</em> representation. Note that
+in order to add two Smis, we need to <em>untag</em> them first. We can do this by
+right shifting them both by 32 bits, to get the actual 32 bit value
+stored in the upper half.</p>
+<p>Note that the result of adding two Smis may not be representable as an
+Smi. For example, if <span class="math inline">x = 2^{31} - 1</span> and <span class="math inline">y = 1</span>, then <span class="math inline">x</span> and <span class="math inline">y</span> are
+both representable as Smis. However <span class="math inline">x + y = 2^{31}</span>, which is outside
+the range of an Smi.</p>
+<p>Let’s consider the code NodeJS generates for adding two Smis. We’ll call
+the <code>add</code> function many times with Smi arguments, to induce V8’s
+optimizer into specializing it for the case of adding two Smis. (I’ve
+done some cleaning to make the assembly look nicer.)</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">add</span>(x<span class="op">,</span> y) { <span class="cf">return</span> x <span class="op">+</span> y<span class="op">;</span> }</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (<span class="kw">let</span> i <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> i <span class="op">&lt;</span> <span class="fl">1e7</span><span class="op">;</span> i<span class="op">++</span>) <span class="fu">add</span>(i<span class="op">,</span> <span class="dv">1</span>)<span class="op">;</span></span></code></pre></div>
+<p>which outputs:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode nasm"><code class="sourceCode nasm"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>$ node <span class="op">--</span>print<span class="op">-</span>opt<span class="op">-</span>code t<span class="op">.</span>js</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>...</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="kw">movq</span> <span class="kw">rdx</span><span class="op">,[</span><span class="kw">rbp</span><span class="op">+</span><span class="bn">0x18</span><span class="op">]</span>   <span class="co">; load argument x</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>testb <span class="kw">rdx</span><span class="op">,</span><span class="bn">0x1</span>         <span class="co">; look at last bit of x</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="cf">jnz</span> <span class="op">&lt;+</span><span class="bn">0x97</span><span class="op">&gt;</span>           <span class="co">; bailout if x is not an Smi</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a><span class="kw">movq</span> <span class="kw">rcx</span><span class="op">,[</span><span class="kw">rbp</span><span class="op">+</span><span class="bn">0x10</span><span class="op">]</span>   <span class="co">; load argument y</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>testb <span class="kw">rcx</span><span class="op">,</span><span class="bn">0x1</span>         <span class="co">; look at last bit of y</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a><span class="cf">jnz</span> <span class="op">&lt;+</span><span class="bn">0xa3</span><span class="op">&gt;</span>           <span class="co">; bailout if y is not an Smi</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a><span class="kw">movq</span> <span class="kw">rdi</span><span class="op">,</span><span class="kw">rcx</span>          <span class="co">; untag Smi x</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>shrq <span class="kw">rdi</span><span class="op">,</span> <span class="dv">32</span>          <span class="co">;   by shifting away the 0s</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a><span class="kw">movq</span> <span class="kw">r8</span><span class="op">,</span><span class="kw">rdx</span>           <span class="co">; untag Smi y</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>shrq <span class="kw">r8</span><span class="op">,</span> <span class="dv">32</span>           <span class="co">;   by shifting away the 0s</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>addl <span class="kw">rdi</span><span class="op">,</span><span class="kw">r8</span>           <span class="co">; add x and y</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="cf">jo</span> <span class="op">&lt;+</span><span class="bn">0xaf</span><span class="op">&gt;</span>            <span class="co">; bailout if overflow</span></span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>shlq <span class="kw">rdi</span><span class="op">,</span> <span class="dv">32</span>          <span class="co">; retag `rdi`</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>...</span></code></pre></div>
+<p>V8 needs to insert <em>bailouts</em>, in case we later call <code>add</code> with something which
+is not an Smi, like <code>add('1','2')</code>. The bailouts generated are
+straightforward: check if <code>x</code> is an Smi otherwise bailout, check if <code>y</code> is an
+Smi otherwise bailout.</p>
+<p>But can we do better? One idea is to <em>optimistically</em> add the two Smis!
+There is some magic here: if we just add the two 64-bit <em>tagged</em> values,
+that’s the same thing as shifting down and then adding. That is:</p>
+<pre><code>x + y == ((x &gt;&gt; 32) + (y &gt;&gt; 32)) &lt;&lt; 32
+(when the low 32 bits of x and y are all 0s)</code></pre>
+<p>Note that this only works when the low 32 bits of <code>x</code> and <code>y</code> are all 0s –
+i.e., we need to be sure that <code>x</code> and <code>y</code> are Smis when we add them.</p>
+<p>Consider the last three bits of the Pointer &amp; Smi diagram above. If we
+add two pointers, the last three bits will always be <code>010</code>. If we add a pointer
+and an Smi, the last three bits will always be <code>001</code>. If we add two
+Smis, the last three bits will be <code>000</code>. In other words, we actually
+added two Smis if the last two bits are both 0.</p>
+<p>One lazy way to do this is to ask a C compiler what it would write.
+Here’s <code>gcc</code>’s output:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode c"><code class="sourceCode c"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="dt">uint32_t</span> add_smi_smi<span class="op">(</span><span class="dt">uint32_t</span> x<span class="op">,</span> <span class="dt">uint32_t</span> y<span class="op">,</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>                     <span class="dt">uint32_t</span> <span class="op">(*</span>bailout<span class="op">)())</span> <span class="op">{</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">uint32_t</span> s<span class="op">;</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(</span>__builtin_add_overflow<span class="op">(</span>x<span class="op">,</span> y<span class="op">,</span> <span class="op">&amp;</span>s<span class="op">)</span> <span class="op">||</span> <span class="op">(</span>s <span class="op">&amp;</span> <span class="dv">3</span><span class="op">))</span> <span class="op">{</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> bailout<span class="op">();</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> s<span class="op">;</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<p>If we compile this with <code>gcc -O3</code>, and then translate it to use the same stack
+loads that the V8 version does, we get something like this. (I changed
+the assembly syntax to match V8’s.)</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode nasm"><code class="sourceCode nasm"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>xorl <span class="kw">rbx</span><span class="op">,</span><span class="kw">rbx</span>        <span class="co">; set rbx to zero (for later)</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="kw">movq</span> <span class="kw">rdx</span><span class="op">,[</span><span class="kw">rbp</span><span class="op">+</span><span class="bn">0x18</span><span class="op">]</span> <span class="co">; load x</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="kw">movq</span> <span class="kw">rcx</span><span class="op">,[</span><span class="kw">rbp</span><span class="op">+</span><span class="bn">0x10</span><span class="op">]</span> <span class="co">; load y</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>addq <span class="kw">rdx</span><span class="op">,</span><span class="kw">rcx</span>        <span class="co">; add x + y</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="kw">seto</span> <span class="kw">bl</span>             <span class="co">; set bl if addition overflowed</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="kw">movq</span> <span class="kw">rax</span><span class="op">,</span><span class="kw">rdx</span>        <span class="co">; copy rdx to rax</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>andl <span class="kw">eax</span><span class="op">,</span><span class="bn">0x3</span>        <span class="co">; compute eax = eax &amp; 3</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>orq  <span class="kw">rax</span><span class="op">,</span><span class="kw">rbx</span>        <span class="co">; compute rax = rax | rbx</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="cf">jne</span>  <span class="op">&lt;</span>bailout<span class="op">&gt;</span>      <span class="co">; if rax != 0, bailout</span></span></code></pre></div>
+<p>I benchmarked the “fast path” (i.e., no bailouts) using <a href="https://github.com/andreas-abel/nanoBench/">nanoBench</a>.
+This ends up being around 25% faster on my server, and produces machine
+code which is about half the size! But it also has a disadvantage: we
+need to do some extra work in the bailout to check which condition
+failed (in particular, we don’t know if <code>x</code> was not an Smi, <code>y</code> was not
+an Smi, or if they were both Smis but an overflowed occurred).</p>
+<p>Overall, I’m not sure if implementing this would be a net win, but I
+<em>suspect</em> it would be. If I have time, I’ll implement this (potentially
+a hacky incorrect version) in V8 and see how much better the computation
+heavy benchmarks get.</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-02-01
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

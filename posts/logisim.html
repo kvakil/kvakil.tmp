@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>XXE in Logisim 2.7.1 and forks</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>XXE in Logisim 2.7.1 and forks</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'security'." href="../tags/security.html" rel="tag">security</a></p>
+        <p><a href="http://www.cburch.com/logisim/download.html">Logisim 2.7.1</a> and all
+forks are vulnerable to an <a href="https://www.owasp.org/index.php/XML_External_Entity_(XXE)_Processing">XML External
+Entity</a>
+attack through a maliciously constructed circuit file. Example exploits
+of XXE are available <a href="https://www.owasp.org/index.php/XML_External_Entity_(XXE)_Processing">on
+OWASP</a>,
+and work with minor modification to fit the format of the Logisim
+circuit files.</p>
+<h2 id="mitigation">Mitigation</h2>
+<p>The official Logisim is no longer maintained, according to its
+<a href="http://www.cburch.com/logisim/retire-note.html">website</a>. As such, no
+attempt was made to notify the original maintainer. However, various
+forks of Logisim are maintained, and all were vulnerable to this issue.
+We notified the maintainers of the most common fork (<a href="https://github.com/reds-heig/logisim-evolution/pull/139">Logisim
+Evolution</a>) and
+the issue was fixed in version 2.14.4 (all prior versions are
+vulnerable).</p>
+    </section>
+    <section class="header">
+        
+        Posted on 2018-12-24
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

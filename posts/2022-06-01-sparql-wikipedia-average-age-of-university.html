@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>University Age Using SPARQL and Wikipedia</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>University Age Using SPARQL and Wikipedia</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'data'." href="../tags/data.html" rel="tag">data</a></p>
+        <script type="text/javascript" src="../assets/vega@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-lite@5.js" defer></script>
+<script type="text/javascript" src="../assets/vega-embed@6.js" defer></script>
+<script type="text/javascript" src="../assets/wikidata-vl.js" defer></script>
+<center>
+<div id="vis" style="width: 100%;max-width:100%">
+
+</div>
+</center>
+<p>I wanted to know “of the universities where students attend today, when
+were they founded”? Turns out
+<a href="https://www.wikidata.org/wiki/Wikidata:Main_Page">Wikidata</a> (from the
+makers of Wikipedia) can be used to answer this question. We can write
+something called a SPARQL query to aggregate “total students by
+university year of founding”:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">SELECT</span> ?<span class="dt">year</span> (<span class="fu">SUM</span>(?st) <span class="kw">AS</span> ?total_students) <span class="kw">WHERE</span> {</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  {</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">SELECT</span> (<span class="fu">MIN</span>(<span class="dt">YEAR</span>(?<span class="dt">date</span>)) <span class="kw">AS</span> ?<span class="dt">year</span>) (<span class="kw">SAMPLE</span>(?students) <span class="kw">AS</span> ?st) <span class="kw">WHERE</span> {</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>      ?university (wdt<span class="ch">:P31</span><span class="op">/</span>(wdt<span class="ch">:P279</span><span class="op">*</span>)) wd<span class="ch">:Q3918</span>;</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>        wdt<span class="ch">:P571</span> ?<span class="dt">date</span>;</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>        wdt<span class="ch">:P17</span> wd<span class="ch">:Q30</span>;</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>        wdt<span class="ch">:P2196</span> ?students.</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>      SERVICE wikibase<span class="ch">:label</span> { bd<span class="ch">:serviceParam</span> wikibase<span class="ch">:language</span> <span class="ot">&quot;en&quot;</span>. }</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    <span class="kw">GROUP</span> <span class="kw">BY</span> ?university</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="kw">GROUP</span> <span class="kw">BY</span> ?<span class="dt">year</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="kw">ORDER</span> <span class="kw">BY</span> (?<span class="dt">year</span>)</span></code></pre></div>
+<p>I won’t attempt to explain this query – Wikidata itself has a <a href="https://www.wikidata.org/wiki/Wikidata:SPARQL_query_service/Wikidata_Query_Help">lovely
+help
+page</a>
+which does a better job than I could, and also contains a lot of other
+examples. If you’d like to play with this query further, you can <a href="https://w.wiki/5Di5">open
+it in the query editor</a>.</p>
+<p>Of course, the overall provenance of this data is a little questionable
+– we’re essentially aggregating a bunch of Wikipedia infoboxes. Some of
+the data may be uncited, and some of the data we need may be missing.
+It’s not a coherent dataset either: the different rows in the result
+measure student enrollment at different years. I don’t think I would
+use this for a serious data project, but it’s fun for these quick little
+“what if” questions.</p>
+<p>Once you have the query, it’s not too hard to create a Vega-Lite
+visualization. If you click “Download”, you can download the result as
+JSON in a format which works directly with Vega-Lite.</p>
+<p>Anyway, here’s what the Vega-Lite spec looks like. It’s pretty
+bog-standard stuff. Perhaps the only interesting thing is I’ve used
+<code>continuousBandSize</code> to stop the bars from overlapping in a weird way.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="er">const</span> <span class="er">spec</span> <span class="er">=</span> <span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;$schema&quot;</span><span class="fu">:</span> <span class="st">&quot;https://vega.github.io/schema/vega-lite/v5.json&quot;</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;data&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;values&quot;</span><span class="fu">:</span> <span class="ot">[]</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;width&quot;</span><span class="fu">:</span> <span class="st">&quot;container&quot;</span><span class="fu">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;height&quot;</span><span class="fu">:</span> <span class="dv">600</span><span class="fu">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;text&quot;</span><span class="fu">:</span> <span class="st">&quot;US student enrollment by college inception year&quot;</span><span class="fu">,</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;subtitle&quot;</span><span class="fu">:</span> <span class="st">&quot;Source: Wikidata&quot;</span><span class="fu">,</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;fontSize&quot;</span><span class="fu">:</span> <span class="dv">24</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mark&quot;</span><span class="fu">:</span> <span class="st">&quot;bar&quot;</span><span class="fu">,</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;encoding&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;x&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;year&quot;</span><span class="fu">,</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;temporal&quot;</span><span class="fu">,</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;axis&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;labelAngle&quot;</span><span class="fu">:</span> <span class="dv">0</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>      <span class="fu">},</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Year university was founded&quot;</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;y&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;field&quot;</span><span class="fu">:</span> <span class="st">&quot;total_students&quot;</span><span class="fu">,</span></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;quantitative&quot;</span><span class="fu">,</span></span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;title&quot;</span><span class="fu">:</span> <span class="st">&quot;Total students&quot;</span></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;config&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;bar&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;continuousBandSize&quot;</span><span class="fu">:</span> <span class="dv">2</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span><span class="er">;</span></span></code></pre></div>
+    </section>
+    <section class="header">
+        
+        Posted on 2022-06-01
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>

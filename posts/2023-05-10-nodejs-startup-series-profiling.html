@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="x-ua-compatible" content="ie=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Node.js Startup: Profiling Startup</title>
+        <link rel="stylesheet" href="../css/default.css" />
+        <link rel="stylesheet" href="../css/syntax.css" />
+          
+    </head>
+    <body>
+        <header>
+            <div class="logo">
+                <a href="../">Keyhan Vakil's blog</a>
+            </div>
+            <nav>
+                <a href="../">Home</a>
+                <a href="../about.html">About</a>
+            </nav>
+        </header>
+
+        <main role="main">
+            <article>
+    <section>
+        <h2>Node.js Startup: Profiling Startup</h2>
+        <p><i>Tags:</i> <a title="All pages tagged 'nodejs-startup'." href="../tags/nodejs-startup.html" rel="tag">nodejs-startup</a>, <a title="All pages tagged 'low-level'." href="../tags/low-level.html" rel="tag">low-level</a></p>
+        <p>In <a href="../posts/2023-05-09-nodejs-startup-series-intro-and-measuring-startup-time.html">the previous
+post</a>
+in <a href="../tags/nodejs-startup.html">this series</a>, we saw how to measure
+Node.js’s startup time using hyperfine. hyperfine is great for
+statistical analysis, but it doesn’t provide as much information as
+<code>perf-stat(1)</code>:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> perf stat <span class="at">--repeat</span><span class="op">=</span>1000 ./node <span class="at">-e</span> 0</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a> <span class="ex">Performance</span> counter stats for <span class="st">'./node -e 0'</span> <span class="er">(</span><span class="ex">1000</span> runs<span class="kw">)</span><span class="bu">:</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    <span class="ex">23.18</span> msec task-clock                <span class="co">#    0.996 CPUs utilized   (+- 0.20%)</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>       <span class="ex">19</span>      context-switches          <span class="co">#  818.731 /sec            (+- 1.23%)</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>        <span class="ex">0</span>      cpu-migrations            <span class="co">#    0.000 /sec            </span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>     <span class="ex">3091</span>      page-faults               <span class="co">#  133.195 K/sec           (+- 0.01%)</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a> <span class="ex">83289964</span>      cycles                    <span class="co">#    3.589 GHz             (+- 0.19%)</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="ex">118025906</span>      instructions              <span class="co">#    1.41  insn per cycle  (+- 0.01%)</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a> <span class="ex">19306506</span>      branches                  <span class="co">#  831.938 M/sec           (+- 0.02%)</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>   <span class="ex">448669</span>      branch-misses             <span class="co">#    2.33% of all branches (+- 0.06%)</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="ex">0.0232809</span> +- 0.0000467 seconds time elapsed  <span class="er">(</span> <span class="ex">+-</span>  0.20% <span class="kw">)</span></span></code></pre></div>
+<p>Node.js is built on top of <a href="https://v8.dev/">Google’s V8 Javascript engine</a>, which has its
+own barebones shell called “d8”. I wanted to see how fast d8 was. This would
+provide a useful lower-bound: d8 does way less than Node.js, so it’s unlikely
+we could beat it.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> perf stat <span class="at">-r</span> 1000 out/Release/d8 <span class="at">-e</span> 0</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a> <span class="ex">Performance</span> counter stats for <span class="st">'out/Release/d8 -e 0'</span> <span class="er">(</span><span class="ex">1000</span> runs<span class="kw">)</span><span class="bu">:</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>     <span class="ex">7.84</span> msec task-clock                <span class="co">#    1.321 CPUs utilized   (+- 0.11%)</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>       <span class="ex">33</span>      context-switches          <span class="co">#    4.506 K/sec           (+- 0.28%)</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>        <span class="ex">0</span>      cpu-migrations            <span class="co">#    0.000 /sec            </span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>      <span class="ex">843</span>      page-faults               <span class="co">#  115.105 K/sec           (+- 0.02%)</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a> <span class="ex">24402305</span>      cycles                    <span class="co">#    3.332 GHz             (+- 0.10%)</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a> <span class="ex">26381058</span>      instructions              <span class="co">#    1.16  insn per cycle  (+- 0.01%)</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>  <span class="ex">4358727</span>      branches                  <span class="co">#  595.150 M/sec           (+- 0.01%)</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>    <span class="ex">77103</span>      branch-misses             <span class="co">#    1.78% of all branches (+- 0.06%)</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="ex">0.00593508</span> +- 0.00000559 seconds time elapsed  <span class="er">(</span> <span class="ex">+-</span>  0.09% <span class="kw">)</span></span></code></pre></div>
+<p>The salient points for me here were:</p>
+<ol type="1">
+<li>Node.js’s startup time is pretty small at 23ms elapsed time. We’ll need to
+be working on shaving off milliseconds/microseconds in order to get faster.
+It also seems unlikely that we’ll get more than 66% faster, based on the d8
+lower bound.</li>
+<li>The CPU is almost entirely utilized. Node.js’s startup is almost entirely
+single-threaded, so “0.996 CPUs utilized” indicates that most of the
+bottleneck is in CPU speed.</li>
+<li>133000 page faults per second is a lot of page faults for a single-threaded
+workload. Something in the hundreds per second would be a more typical workload.
+This makes sense though – a lot of memory movement is happening during program
+startup: loading the executable into memory, shared library resolution, and
+so on.</li>
+</ol>
+<h3 id="profiling-with-perf">Profiling with perf</h3>
+<p>My go-to profiler is <code>perf(1)</code>. <code>perf</code> works by interrupting the program
+periodically and capturing a stacktrace of the currently executing code. For
+more details about <code>perf</code>, I recommend <a href="https://www.brendangregg.com/perf.html">Brendan Gregg’s writeup</a>. Here’s
+the <code>perf</code> command I ran to profile Node.js’s startup:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="va">LD_LIBRARY_PATH</span><span class="op">=</span>/lib/libc6-prof/x86_64-linux-gnu <span class="dt">\</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    <span class="ex">perf</span> record <span class="at">-g</span> <span class="at">-F</span> 299 <span class="at">--</span> bash <span class="at">-c</span> <span class="st">'for i in {1..1000}; do ./node -e 0; done'</span></span></code></pre></div>
+<p>Profiling just one execution of node was not very useful, because the runtime
+is so short, and so perf does not have much time to sample the execution. Using
+a tight loop increased the number of samples. I also chose to use libc6-prof
+via <code>LD_LIBRARY_PATH</code>, which is a version of glibc with frame pointers enabled.
+Frame pointers are necessary so that <code>perf record</code> can correctly unwind stacks
+with <code>-g</code>, otherwise time spent in the C standard library may not be correctly
+attributed to its callers. On Debian, you can install this via <code>apt install libc6-prof</code>.</p>
+<p>For viewing the collected profiles, I rarely use the included perf-report
+interface.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a> Using <code>perf script</code>, we can export the stack traces to a
+format that can be ingested by other tools. The output format is a series of
+stack traces separated by newlines. Each stack trace has a single header line
+containing information like the pid and sampling time, followed by the sampled
+backtrace. Here’s the first couple of backtraces for our sample:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">$</span> perf script <span class="at">-F</span> comm,pid,tid,time,period,event,ip,sym,symoff,dso</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">perf-exec</span> 46503/46503  7797.395284:          1 cycles: </span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>        <span class="ex">ffffffff93296146</span> native_write_msr+0x6 <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>        <span class="ex">ffffffff9320f1a5</span> intel_pmu_enable_all+0x15 <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>        <span class="ex">ffffffff932092fb</span> x86_pmu_enable+0x1ab <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>	<span class="ex">...</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="ex">node</span> 46505/46505  7797.403597:   27382873 cycles: </span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>        <span class="ex">ffffffff938a2ea7</span> copy_page+0x7 <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>        <span class="ex">ffffffff934fa35e</span> do_fault+0x24e <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>        <span class="ex">ffffffff934fa9cd</span> handle_pte_fault+0x1cd <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>        <span class="ex">...</span></span></code></pre></div>
+<p>I wanted to post-process this output to focus on only Node processes. Also
+since there was many Node processes, I wanted to collect all of their stack
+traces as if they came from one process (by replacing all of their pids to be
+the same). Finally I wanted to focus only on stack traces where the pid was
+equal to the tid. That indicates the main thread of Node.js, which is where
+almost all of the interesting work happens. I ended up crafting this Perl
+script:<a href="#fn2" class="footnote-ref" id="fnref2" role="doc-noteref"><sup>2</sup></a></p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode perl"><code class="sourceCode perl"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># By default, we don't print the stack trace.</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="dt">$b</span> = <span class="dv">0</span> <span class="kw">if</span> <span class="ot">/</span><span class="ch">^</span><span class="bn">\w</span><span class="ot">/</span>;</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Start printing the stack trace if it matches the regex,</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="co"># indicating that this is a stack sampled from the main thread</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="co"># of a Node process.</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="co">#</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Replace the main thread with a fake aggregated thread of</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="co"># &quot;node 1/1&quot;.</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="dt">$b</span> = <span class="dv">1</span> <span class="kw">if</span> <span class="ot">s@</span><span class="ch">^</span><span class="ot">node </span><span class="ch">([</span><span class="bn">0-9</span><span class="ch">]+)</span><span class="ot">/</span><span class="wa">\1</span><span class="ot">@</span><span class="st">node 1/1</span><span class="ot">@</span>;</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span> <span class="kw">if</span> <span class="dt">$b</span></span></code></pre></div>
+<p>And as a one-liner:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="ex">perf</span> script <span class="at">-F</span> comm,pid,tid,time,period,event,ip,sym,symoff,dso <span class="dt">\</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">|</span> <span class="fu">perl</span> <span class="at">-n</span> <span class="at">-e</span><span class="st">'$b=0 if/^\w/;$b=1 if s@^node ([0-9]+)/\1@node 1/1@;print if$b'</span></span></code></pre></div>
+<p>Aggregating across a bunch of processes means that a timeline view is useless,
+but flamegraph visualizations still work fine.</p>
+<p>I happily loaded the output script into <a href="https://profiler.firefox.com/">Firefox Profiler</a>. Unfortunately,
+more than half of stacks looked purely like <code>perf</code> overhead, mentioning things
+like “intel_pmu” (“Performance Monitor Unit”):</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="ex">node</span> 1/1  7804.131591:          1 cycles: </span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>	<span class="ex">ffffffff93296146</span> native_write_msr+0x6 <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>	<span class="ex">ffffffff9320f1a5</span> intel_pmu_enable_all+0x15 <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>	<span class="ex">ffffffff932092fb</span> x86_pmu_enable+0x1ab <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>	<span class="ex">ffffffff9349b09c</span> __perf_event_task_sched_in+0x1ac <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>	<span class="ex">ffffffff932fbf47</span> finish_task_switch.isra.0+0x157 <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>	<span class="ex">ffffffff93304891</span> schedule_tail+0x11 <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>	<span class="ex">ffffffff93204c88</span> ret_from_fork+0x8 <span class="er">(</span><span class="ex">[kernel.kallsyms]</span><span class="kw">)</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>            <span class="ex">7fa9c7a8256d</span> send_vc+0x4bd <span class="er">(</span><span class="ex">/usr/lib/libc6-prof/x86_64-linux-gnu/libc.so.6</span><span class="kw">)</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>            <span class="ex">7fa9c79ec6d5</span> __strncat_ssse3+0x325 <span class="er">(</span><span class="ex">/usr/lib/libc6-prof/x86_64-linux-gnu/libc.so.6</span><span class="kw">)</span></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>            <span class="ex">7fa9c79ed2bc</span> __strncat_ssse3+0xf0c <span class="er">(</span><span class="ex">/usr/lib/libc6-prof/x86_64-linux-gnu/libc.so.6</span><span class="kw">)</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>        <span class="ex">fffffffeffffffff</span> <span class="pp">[</span><span class="ss">unknown</span><span class="pp">]</span> <span class="er">(</span><span class="ex">[unknown]</span><span class="kw">)</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>            <span class="ex">56367bb5ea70</span> <span class="pp">[</span><span class="ss">unknown</span><span class="pp">]</span> <span class="er">(</span><span class="ex">[unknown]</span><span class="kw">)</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>        <span class="ex">48f0ffffffff0000</span> <span class="pp">[</span><span class="ss">unknown</span><span class="pp">]</span> <span class="er">(</span><span class="ex">[unknown]</span><span class="kw">)</span></span></code></pre></div>
+<p>Firefox Profiler’s visualizer already provides functionality to drop stack
+frames containing certain functions. However it is also possible to filter
+out these overhead stacks out with some perl:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode perl"><code class="sourceCode perl"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Don't print stack traces containing &quot;send_vc&quot; or &quot;perf_event_&quot;.</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="dt">$b</span>=<span class="dv">1</span> <span class="kw">if</span> <span class="ot">/send_vc</span><span class="ch">|</span><span class="ot">perf_event_/</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="kw">if</span> (<span class="wa">$_</span>) {</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    <span class="co"># If the line isn't empty, append it to the current</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>    <span class="co"># stack trace.</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">$s</span> = <span class="ot">&quot;</span><span class="dt">$s</span><span class="ch">\n</span><span class="wa">$_</span><span class="ot">&quot;</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>} <span class="kw">else</span> {</span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>    <span class="co"># If this is a newline, decide whether or not to print the</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>    <span class="co"># stack trace.</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">say</span> <span class="dt">$s</span> <span class="kw">if</span> !<span class="dt">$b</span>;</span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Reset for the next block.</span></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">$b</span> = <span class="dv">0</span>;</span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">$s</span> = <span class="ot">&quot;&quot;</span></span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p>Or again as a bash one-liner:</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">perl</span> <span class="at">-lanE</span> <span class="st">'if($_){$s=&quot;$s\n$_&quot;}else{say $s if !$b;$b=0;$s=&quot;&quot;};$b=1 if/send_vc|perf_event_/'</span></span></code></pre></div>
+<p>Here’s the script, all strung together.</p>
+<div class="sourceCode" id="cb10"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co">#!/bin/bash</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> <span class="at">-Eeuox</span> pipefail</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="va">LD_LIBRARY_PATH</span><span class="op">=</span>/lib/libc6-prof/x86_64-linux-gnu <span class="dt">\</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>  <span class="ex">perf</span> record <span class="at">-g</span> <span class="at">-F</span> 299 <span class="at">--</span> bash <span class="at">-c</span> <span class="st">'for i in {1..1000}; do ./node -e 0; done'</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="ex">perf</span> script <span class="at">-F</span> comm,pid,tid,time,period,event,ip,sym,symoff,dso <span class="dt">\</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="fu">perl</span> <span class="at">-n</span> <span class="at">-e</span><span class="st">'$b=0 if/^\w/;$b=1 if s@^node ([0-9]+)/\1@node 1/1@;print if$b'</span> <span class="dt">\</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="fu">perl</span> <span class="at">-lanE</span> <span class="st">'if($_){$s=&quot;$s\n$_&quot;}else{say $s if !$b;$b=0;$s=&quot;&quot;};$b=1 if/send_vc|perf_event_/'</span> <span class="dt">\</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="fu">sed</span> <span class="st">'1{/^$/d}'</span> <span class="dt">\</span></span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>  <span class="kw">|</span> <span class="fu">gzip</span> <span class="at">-c</span> <span class="op">&gt;</span> stacks.gz</span></code></pre></div>
+<p>I inserted some manual printf statements to measure time and checked that the
+results were similar to the CPU times I got from the profiles. This indicated
+to me that filtering out these overhead stacks was a reasonable decision.</p>
+<p>We can generate an interactive SVG flamegraph using
+<a href="https://github.com/brendangregg/FlameGraph">FlameGraph</a>:</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./flamegraph.pl</span> <span class="at">--inverted</span> <span class="at">--colors</span> js <span class="dt">\</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--title</span> <span class="st">'Node.js startup graph'</span> <span class="dt">\</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>  <span class="op">&lt;(</span><span class="fu">perl</span> stackcollapse-perf.pl <span class="op">&lt;(</span><span class="fu">gunzip</span> <span class="at">-c</span> ~/node/stacks.gz<span class="op">))</span> <span class="dt">\</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>  <span class="op">&gt;</span> nodejs-startup-flamegraph.svg</span></code></pre></div>
+<p>I included the FlameGraph inline below for your pleasure (<a href="../assets/nodejs-startup-flamegraph.svg">full size
+version</a>). Feel free to click
+around and see what you can find in advance of the next post in <a href="../tags/nodejs-startup.html">the
+series</a>. If you prefer to view this in an
+external tool like <a href="https://profiler.firefox.com/">Firefox Profiler</a> or
+<a href="https://speedscope.app">Speedscope</a>, you can <a href="../assets/nodejs-startup-stacks.gz">download the profile
+here</a>.</p>
+<center>
+<object type="image/svg+xml" data="../assets/nodejs-startup-flamegraph.svg" style="max-width: 100%">
+</object>
+</center>
+<aside id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes">
+<hr />
+<ol>
+<li id="fn1"><p>The main advantage of the included interface is being able to look
+at samples at a machine code level granularity, i.e. looking at individual
+assembly instruction bottlenecks. But usually I almost always want a
+higher-level picture.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn2"><p>If you don’t enjoy Perl, there are way more principled ways to do this
+rewriting, e.g. through using perf-script’s support for Python scripts. See
+<a href="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/tools/perf/Documentation/perf-script-python.txt"><code>linux/tools/perf/Documentation/perf-script-python.txt</code></a>.
+I don’t use it though, because my distro does not compile perf with it, and I’m
+too lazy to recompile.<a href="#fnref2" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+</ol>
+</aside>
+    </section>
+    <section class="header">
+        
+        Posted on 2023-05-10
+    </section>
+</article>
+
+        </main>
+
+        <footer>
+            <a href="https://github.com/kvakil">Github</a> | Email: ken [at sign] kvakil.me
+        </footer>
+
+        <script type="text/javascript" src="../js/load-annotator.js"></script>
+    </body>
+</html>
